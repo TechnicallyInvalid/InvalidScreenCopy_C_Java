@@ -38,9 +38,13 @@ the bundle is locally ad-hoc signed, not a notarized standalone distribution.
 - Click **Record** or choose **Recording → Start Recording** (Command-R).
 - Click **Stop Recording** or press Command-Shift-R. Wait for **Saved** before
   moving a clip. Closing the app also finalizes an active recording.
-- Choose **Recording → Choose Recording Folder…** to set a persistent folder.
+- Click **Choose Folder** or choose **Recording → Choose Recording Folder…**
+  to set a persistent folder.
   Cancel leaves the previous choice untouched. A folder change affects the
   next clip; an active clip stays in its original file.
+- Click **Open Folder** or choose **Recording → Open Current Folder** to open
+  the selected recording directory in Finder. Status appears centered above
+  the four buttons.
 - **Use Launch Folder** clears that preference. The default is the shell's
   working directory; for Finder launches with cwd `/`, it is the folder
   containing the app bundle. Hover over the status/buttons to see full paths.

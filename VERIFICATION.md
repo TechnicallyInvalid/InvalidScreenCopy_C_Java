@@ -48,6 +48,13 @@ On the attached Pixel 8 Pro, Android 17, USB:
   the buttons created two consecutive clips; both H.264/AAC files fully decoded
   with `ffmpeg -xerror`. The rebuilt app passed signature verification and was
   left running after Stop finalized the second clip.
+- The subsequent folder-controls update places Choose Folder and Open Folder
+  beside Record/Stop, with status centered in the header. Mouse clicks opened
+  the chooser and the current destination in Finder. Chooser cancellation
+  preserved the destination; selecting another folder updated the destination
+  and tooltip, and Recording → Open Current Folder opened that selected folder.
+  The original launch-folder destination was restored after verification.
+  The updated client compiled and its packaged signature passed verification.
 
 Phone footage and generated fixtures remain local and are ignored by Git.
 The device's audio track decoded successfully; the audible test signal was

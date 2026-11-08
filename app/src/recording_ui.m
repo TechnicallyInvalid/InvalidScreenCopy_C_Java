@@ -19,6 +19,7 @@
 @property(nonatomic, strong) NSTitlebarAccessoryViewController *accessory;
 @property(nonatomic, strong) NSButton *recordButton;
 @property(nonatomic, strong) NSButton *stopButton;
+@property(nonatomic, strong) NSButton *openFolderButton;
 @property(nonatomic, strong) NSTextField *status;
 @property(nonatomic, strong) NSMenuItem *menuItem;
 @property(nonatomic, strong) NSMenuItem *startItem;
@@ -31,6 +32,7 @@
 - (void)start:(id)sender;
 - (void)stop:(id)sender;
 - (void)chooseFolder:(id)sender;
+- (void)openFolder:(id)sender;
 - (void)useLaunchFolder:(id)sender;
 - (void)dispose;
 @end
@@ -57,6 +59,7 @@
     self.status.toolTip = [fullDetail stringByAppendingFormat:@"\nFolder: %@", self.directory];
     self.status.textColor = active ? NSColor.systemRedColor : NSColor.secondaryLabelColor;
     self.recordButton.toolTip = [@"Save a new MP4 in " stringByAppendingString:self.directory];
+    self.openFolderButton.toolTip = [@"Open in Finder: " stringByAppendingString:self.directory];
 }
 - (void)start:(id)sender {
     (void)sender;
@@ -115,6 +118,21 @@
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"InvalidScreenCopyRecordingDirectory"];
     [self refresh];
 }
+- (void)openFolder:(id)sender {
+    (void)sender;
+    BOOL isDirectory = NO;
+    BOOL exists = [NSFileManager.defaultManager fileExistsAtPath:self.directory
+                                                   isDirectory:&isDirectory];
+    NSURL *url = [NSURL fileURLWithPath:self.directory isDirectory:YES];
+    if (exists && isDirectory && [NSWorkspace.sharedWorkspace openURL:url]) {
+        return;
+    }
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Could not open recording folder";
+    alert.informativeText = [NSString stringWithFormat:
+        @"Check that this folder still exists and is accessible:\n%@", self.directory];
+    [alert beginSheetModalForWindow:self.window completionHandler:nil];
+}
 - (void)dispose {
     [self.timer invalidate];
     self.timer = nil;
@@ -149,7 +167,16 @@ sc_recording_ui_create(SDL_Window *window, struct sc_recording *recording,
             ?: ui.launchDirectory;
         ui.accessory = [[NSTitlebarAccessoryViewController alloc] init];
         ui.accessory.layoutAttribute = NSLayoutAttributeBottom;
-        CGFloat rowWidth = MAX(380, nativeWindow.contentView.bounds.size.width);
+        // Keep the four buttons usable when the mirror window is narrowed.
+        NSSize minimumSize = nativeWindow.minSize;
+        minimumSize.width = MAX(minimumSize.width, 502);
+        nativeWindow.minSize = minimumSize;
+        NSRect windowFrame = nativeWindow.frame;
+        if (windowFrame.size.width < minimumSize.width) {
+            windowFrame.size.width = minimumSize.width;
+            [nativeWindow setFrame:windowFrame display:YES];
+        }
+        CGFloat rowWidth = nativeWindow.contentView.bounds.size.width;
         NSView *view = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 66)];
         [view.heightAnchor constraintEqualToConstant:66].active = YES;
         ui.accessory.fullScreenMinHeight = 66;
@@ -159,13 +186,22 @@ sc_recording_ui_create(SDL_Window *window, struct sc_recording *recording,
         ui.stopButton = [NSButton buttonWithTitle:@"■ Stop Recording" target:ui action:@selector(stop:)];
         ui.stopButton.frame = NSMakeRect(108, 4, 142, 28);
         ui.stopButton.accessibilityLabel = @"Stop Recording";
+        NSButton *chooseFolder = [NSButton buttonWithTitle:@"Choose Folder" target:ui action:@selector(chooseFolder:)];
+        chooseFolder.frame = NSMakeRect(258, 4, 116, 28);
+        chooseFolder.toolTip = @"Choose where new recordings are saved";
+        ui.openFolderButton = [NSButton buttonWithTitle:@"Open Folder" target:ui action:@selector(openFolder:)];
+        ui.openFolderButton.frame = NSMakeRect(382, 4, 108, 28);
         ui.status = [NSTextField labelWithString:@"Waiting for the video stream…"];
-        ui.status.frame = NSMakeRect(260, 8, rowWidth - 272, 20);
+        // Symmetric insets center status text while leaving native controls clear.
+        ui.status.frame = NSMakeRect(80, 38, rowWidth - 160, 20);
         ui.status.autoresizingMask = NSViewWidthSizable;
+        ui.status.alignment = NSTextAlignmentCenter;
         ui.status.lineBreakMode = NSLineBreakByTruncatingMiddle;
         ui.status.font = [NSFont systemFontOfSize:11];
         [view addSubview:ui.recordButton];
         [view addSubview:ui.stopButton];
+        [view addSubview:chooseFolder];
+        [view addSubview:ui.openFolderButton];
         [view addSubview:ui.status];
         ui.accessory.view = view;
         [nativeWindow addTitlebarAccessoryViewController:ui.accessory];
@@ -180,6 +216,8 @@ sc_recording_ui_create(SDL_Window *window, struct sc_recording *recording,
         [menu addItem:NSMenuItem.separatorItem];
         NSMenuItem *choose = [menu addItemWithTitle:@"Choose Recording Folder…" action:@selector(chooseFolder:) keyEquivalent:@""];
         choose.target = ui;
+        NSMenuItem *open = [menu addItemWithTitle:@"Open Current Folder" action:@selector(openFolder:) keyEquivalent:@""];
+        open.target = ui;
         NSMenuItem *reset = [menu addItemWithTitle:@"Use Launch Folder" action:@selector(useLaunchFolder:) keyEquivalent:@""];
         reset.target = ui;
         ui.menuItem = [[NSMenuItem alloc] initWithTitle:@"Recording" action:nil keyEquivalent:@""];
