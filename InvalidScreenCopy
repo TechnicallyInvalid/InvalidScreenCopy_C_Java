@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export SCRCPY_SERVER_PATH="$project_dir/build-server/scrcpy-server"
+export SCRCPY_ICON_DIR="$project_dir/app/data"
+exec "$project_dir/build/app/InvalidScreenCopy" "$@"

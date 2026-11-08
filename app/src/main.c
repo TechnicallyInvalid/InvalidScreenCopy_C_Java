@@ -33,8 +33,8 @@ main_scrcpy(int argc, char *argv[]) {
     setbuf(stderr, NULL);
 #endif
 
-    printf("scrcpy " SCRCPY_VERSION
-           " <https://github.com/Genymobile/scrcpy>\n");
+    printf("InvalidScreenCopy " SCRCPY_VERSION
+           " (based on scrcpy) <https://github.com/TechnicallyInvalid/InvalidScreenCopy_C_Java>\n");
 
     struct scrcpy_cli_args args = {
         .opts = scrcpy_options_default,

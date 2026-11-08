@@ -571,7 +571,7 @@ scrcpy(struct scrcpy_options *options) {
     struct sc_server_info *info = &s->server.info;
 
     const char *window_title =
-        options->window_title ? options->window_title : info->device_name;
+        options->window_title ? options->window_title : "InvalidScreenCopy";
     assert(window_title);
 
     if (options->update_terminal_title) {
