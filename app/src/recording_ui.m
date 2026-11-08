@@ -2,6 +2,16 @@
 #include <libavutil/time.h>
 #include "recording_ui.h"
 
+// Keep clicks in the recording row out of the window's title-bar drag handling.
+@interface InvalidRecordingRow : NSView
+@end
+
+@implementation InvalidRecordingRow
+- (BOOL)mouseDownCanMoveWindow {
+    return NO;
+}
+@end
+
 @interface InvalidRecordingUI : NSObject
 @property(nonatomic, assign) struct sc_recording *recording;
 @property(nonatomic, assign) struct sc_controller *controller;
@@ -139,17 +149,19 @@ sc_recording_ui_create(SDL_Window *window, struct sc_recording *recording,
             ?: ui.launchDirectory;
         ui.accessory = [[NSTitlebarAccessoryViewController alloc] init];
         ui.accessory.layoutAttribute = NSLayoutAttributeBottom;
-        NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 380, 66)];
+        CGFloat rowWidth = MAX(380, nativeWindow.contentView.bounds.size.width);
+        NSView *view = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 66)];
         [view.heightAnchor constraintEqualToConstant:66].active = YES;
         ui.accessory.fullScreenMinHeight = 66;
         ui.recordButton = [NSButton buttonWithTitle:@"● Record" target:ui action:@selector(start:)];
-        ui.recordButton.frame = NSMakeRect(80, 32, 120, 28);
+        ui.recordButton.frame = NSMakeRect(12, 4, 90, 28);
         ui.recordButton.accessibilityLabel = @"Record";
         ui.stopButton = [NSButton buttonWithTitle:@"■ Stop Recording" target:ui action:@selector(stop:)];
-        ui.stopButton.frame = NSMakeRect(205, 32, 170, 28);
+        ui.stopButton.frame = NSMakeRect(108, 4, 142, 28);
         ui.stopButton.accessibilityLabel = @"Stop Recording";
         ui.status = [NSTextField labelWithString:@"Waiting for the video stream…"];
-        ui.status.frame = NSMakeRect(12, 8, 362, 20);
+        ui.status.frame = NSMakeRect(260, 8, rowWidth - 272, 20);
+        ui.status.autoresizingMask = NSViewWidthSizable;
         ui.status.lineBreakMode = NSLineBreakByTruncatingMiddle;
         ui.status.font = [NSFont systemFontOfSize:11];
         [view addSubview:ui.recordButton];

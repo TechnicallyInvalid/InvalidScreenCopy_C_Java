@@ -42,8 +42,12 @@ On the attached Pixel 8 Pro, Android 17, USB:
   rounding. Low frame count is expected for an unchanged screen.
 - The final clip was fully decoded with `ffmpeg -xerror -fps_mode passthrough`.
 - Screen-off/no-keyframe timeout reported failure and removed the empty clip.
-- Final visual check showed the buttons separated from native title-bar
-  controls and a concise filename/status display.
+- After feedback about unreliable header clicks, Record and Stop were moved
+  onto the lower status row with the status to their right. That row disables
+  window dragging. Actual mouse clicks at the centers and near the edges of
+  the buttons created two consecutive clips; both H.264/AAC files fully decoded
+  with `ffmpeg -xerror`. The rebuilt app passed signature verification and was
+  left running after Stop finalized the second clip.
 
 Phone footage and generated fixtures remain local and are ignored by Git.
 The device's audio track decoded successfully; the audible test signal was
