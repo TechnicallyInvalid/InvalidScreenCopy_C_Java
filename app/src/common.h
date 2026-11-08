@@ -5,8 +5,12 @@
 #include "compat.h"
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof(a[0]))
+#ifndef MIN
 #define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
+#endif
+#ifndef MAX
 #define MAX(X,Y) ((X) > (Y) ? (X) : (Y))
+#endif
 #define CLAMP(V,X,Y) MIN( MAX((V),(X)), (Y) )
 
 #define container_of(ptr, type, member) \

@@ -1,7 +1,15 @@
-> [!WARNING]
-> **This GitHub repo (<https://github.com/Genymobile/scrcpy>) is the only official
-source for the project. Do not download releases from random websites, even if
-their name contains `scrcpy`.**
+# InvalidScreenCopy
+
+A source-built fork of scrcpy 5.0.1 with native macOS Record and Stop Recording
+buttons, a recording-folder menu, and automatic timestamped MP4 clips.
+
+See [build and usage instructions](INVALIDSCREENCOPY.md), the
+[scoped security review](SECURITY_REVIEW.md), and [verification](VERIFICATION.md).
+This fork is not an official Genymobile release. The original scrcpy project is
+[Genymobile/scrcpy](https://github.com/Genymobile/scrcpy). Its documentation and
+license are retained below.
+
+---
 
 # scrcpy (v5.0.1)
 

@@ -8,3 +8,8 @@ build/
 /x/
 local.properties
 /scrcpy-server
+/local/
+*.mp4
+*.mkv
+*.wav
+/.build-tools/

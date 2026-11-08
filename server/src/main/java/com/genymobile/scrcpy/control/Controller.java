@@ -334,6 +334,11 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
 
         // Events for all sources (display or camera)
         switch (type) {
+            case ControlMessage.TYPE_REQUEST_KEYFRAME:
+                if (surfaceCapture != null && surfaceCapture.getCaptureControl() != null) {
+                    surfaceCapture.getCaptureControl().requestKeyFrame();
+                }
+                return true;
             case ControlMessage.TYPE_RESET_VIDEO:
                 resetVideo();
                 return true;

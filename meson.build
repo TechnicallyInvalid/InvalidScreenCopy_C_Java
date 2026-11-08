@@ -1,5 +1,5 @@
-project('scrcpy', 'c',
-        version: '5.0.1',
+project('InvalidScreenCopy', 'c',
+        version: '5.0.1-invalid.1',
         meson_version: '>= 0.49',
         default_options: [
             'c_std=c11',

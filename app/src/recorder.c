@@ -4,6 +4,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/time.h>
@@ -125,6 +126,32 @@ sc_recorder_write_audio(struct sc_recorder *recorder, AVPacket *packet) {
     return sc_recorder_write_stream(recorder, &recorder->audio_stream, packet);
 }
 
+static int
+sc_recorder_write_file(void *opaque, const uint8_t *buffer, int size) {
+    FILE *file = opaque;
+    size_t written = fwrite(buffer, 1, size, file);
+    return written == (size_t) size ? size : AVERROR(errno ? errno : EIO);
+}
+
+static int64_t
+sc_recorder_seek_file(void *opaque, int64_t offset, int whence) {
+    FILE *file = opaque;
+    if (whence == AVSEEK_SIZE) {
+        return AVERROR(ENOSYS);
+    }
+#ifdef _WIN32
+    if (_fseeki64(file, offset, whence & ~AVSEEK_FORCE)) {
+        return AVERROR(errno);
+    }
+    return _ftelli64(file);
+#else
+    if (fseeko(file, offset, whence & ~AVSEEK_FORCE)) {
+        return AVERROR(errno);
+    }
+    return ftello(file);
+#endif
+}
+
 static bool
 sc_recorder_open_output_file(struct sc_recorder *recorder) {
     const char *format_name = sc_recorder_get_format_name(recorder->format);
@@ -141,33 +168,63 @@ sc_recorder_open_output_file(struct sc_recorder *recorder) {
         return false;
     }
 
-    char *file_url = sc_str_concat("file:", recorder->filename);
-    if (!file_url) {
-        avformat_free_context(recorder->ctx);
-        return false;
-    }
+    if (recorder->output_file) {
+        uint8_t *buffer = av_malloc(32768);
+        if (!buffer) {
+            avformat_free_context(recorder->ctx);
+            return false;
+        }
+        recorder->ctx->pb = avio_alloc_context(buffer, 32768, 1,
+            recorder->output_file, NULL, sc_recorder_write_file,
+            sc_recorder_seek_file);
+        if (!recorder->ctx->pb) {
+            av_free(buffer);
+            avformat_free_context(recorder->ctx);
+            return false;
+        }
+        recorder->ctx->flags |= AVFMT_FLAG_CUSTOM_IO;
+    } else {
+        char *file_url = sc_str_concat("file:", recorder->filename);
+        if (!file_url) {
+            avformat_free_context(recorder->ctx);
+            return false;
+        }
 
-    int ret = avio_open(&recorder->ctx->pb, file_url, AVIO_FLAG_WRITE);
-    free(file_url);
-    if (ret < 0) {
-        LOGE("Failed to open output file: %s", recorder->filename);
-        avformat_free_context(recorder->ctx);
-        return false;
+        int ret = avio_open(&recorder->ctx->pb, file_url, AVIO_FLAG_WRITE);
+        free(file_url);
+        if (ret < 0) {
+            LOGE("Failed to open output file: %s", recorder->filename);
+            avformat_free_context(recorder->ctx);
+            return false;
+        }
     }
 
     recorder->ctx->oformat = format;
 
     av_dict_set(&recorder->ctx->metadata, "comment",
-                "Recorded by scrcpy " SCRCPY_VERSION, 0);
+                "Recorded by InvalidScreenCopy " SCRCPY_VERSION, 0);
 
     LOGI("Recording started to %s file: %s", format_name, recorder->filename);
     return true;
 }
 
-static void
+static bool
 sc_recorder_close_output_file(struct sc_recorder *recorder) {
-    avio_close(recorder->ctx->pb);
+    bool ok;
+    if (recorder->output_file) {
+        avio_flush(recorder->ctx->pb);
+        ok = recorder->ctx->pb->error >= 0;
+        av_freep(&recorder->ctx->pb->buffer);
+        avio_context_free(&recorder->ctx->pb);
+        if (fclose(recorder->output_file)) {
+            ok = false;
+        }
+        recorder->output_file = NULL;
+    } else {
+        ok = avio_close(recorder->ctx->pb) >= 0;
+    }
     avformat_free_context(recorder->ctx);
+    return ok;
 }
 
 static inline bool
@@ -278,6 +335,8 @@ end:
 static bool
 sc_recorder_process_packets(struct sc_recorder *recorder) {
     int64_t pts_origin = AV_NOPTS_VALUE;
+    int64_t last_audio_pts = 0;
+    int64_t duration_hint = 0;
 
     bool header_written = sc_recorder_process_header(recorder);
     if (!header_written) {
@@ -332,6 +391,7 @@ sc_recorder_process_packets(struct sc_recorder *recorder) {
         }
 
         if (recorder->stopped && !video_pkt && !audio_pkt) {
+            duration_hint = recorder->duration_hint;
             assert(sc_vecdeque_is_empty(&recorder->video_queue));
             assert(sc_vecdeque_is_empty(&recorder->audio_queue));
             sc_mutex_unlock(&recorder->mutex);
@@ -406,6 +466,7 @@ sc_recorder_process_packets(struct sc_recorder *recorder) {
         if (audio_pkt) {
             audio_pkt->pts -= pts_origin;
             audio_pkt->dts = audio_pkt->pts;
+            last_audio_pts = audio_pkt->pts;
 
             bool ok = sc_recorder_write_audio(recorder, audio_pkt);
             if (!ok) {
@@ -422,8 +483,10 @@ sc_recorder_process_packets(struct sc_recorder *recorder) {
     // Write the last video packet
     AVPacket *last = video_pkt_previous;
     if (last) {
-        // assign an arbitrary duration to the last packet
-        last->duration = 100000;
+        // Keep the final still frame visible through Stop, including when the
+        // Android compositor stopped emitting frames on a static display.
+        int64_t end_pts = MAX(duration_hint, last_audio_pts);
+        last->duration = MAX(INT64_C(100000), end_pts - last->pts);
         bool ok = sc_recorder_write_video(recorder, last);
         if (!ok) {
             // failing to write the last frame is not very serious, no
@@ -453,14 +516,9 @@ end:
 
 static bool
 sc_recorder_record(struct sc_recorder *recorder) {
-    bool ok = sc_recorder_open_output_file(recorder);
-    if (!ok) {
-        return false;
-    }
-
-    ok = sc_recorder_process_packets(recorder);
-    sc_recorder_close_output_file(recorder);
-    return ok;
+    bool ok = sc_recorder_process_packets(recorder);
+    bool closed = sc_recorder_close_output_file(recorder);
+    return ok && closed;
 }
 
 static int
@@ -779,6 +837,7 @@ sc_recorder_init(struct sc_recorder *recorder, const char *filename,
     sc_vecdeque_init(&recorder->video_queue);
     sc_vecdeque_init(&recorder->audio_queue);
     recorder->stopped = false;
+    recorder->duration_hint = 0;
 
     recorder->video_init = false;
     recorder->audio_init = false;
@@ -790,6 +849,7 @@ sc_recorder_init(struct sc_recorder *recorder, const char *filename,
     sc_recorder_stream_init(&recorder->audio_stream);
 
     recorder->format = format;
+    recorder->output_file = NULL;
 
     assert(cbs && cbs->on_ended);
     recorder->cbs = cbs;
@@ -828,10 +888,15 @@ error_free_filename:
 
 bool
 sc_recorder_start(struct sc_recorder *recorder) {
+    // Initialize the muxer before packet-sink open callbacks can use it.
+    if (!sc_recorder_open_output_file(recorder)) {
+        return false;
+    }
     bool ok = sc_thread_create(&recorder->thread, run_recorder,
                                "scrcpy-recorder", recorder);
     if (!ok) {
         LOGE("Could not start recorder thread");
+        sc_recorder_close_output_file(recorder);
         return false;
     }
 
@@ -840,7 +905,15 @@ sc_recorder_start(struct sc_recorder *recorder) {
 
 void
 sc_recorder_stop(struct sc_recorder *recorder) {
+    sc_recorder_stop_with_duration(recorder, 0);
+}
+
+void
+sc_recorder_stop_with_duration(struct sc_recorder *recorder, int64_t duration) {
     sc_mutex_lock(&recorder->mutex);
+    if (!recorder->stopped) {
+        recorder->duration_hint = duration;
+    }
     recorder->stopped = true;
     sc_cond_signal(&recorder->cond);
     sc_mutex_unlock(&recorder->mutex);
@@ -853,6 +926,9 @@ sc_recorder_join(struct sc_recorder *recorder) {
 
 void
 sc_recorder_destroy(struct sc_recorder *recorder) {
+    if (recorder->output_file) {
+        fclose(recorder->output_file);
+    }
     sc_vecdeque_destroy(&recorder->video_queue);
     sc_vecdeque_destroy(&recorder->audio_queue);
     sc_cond_destroy(&recorder->cond);

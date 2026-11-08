@@ -40,12 +40,15 @@ struct sc_recorder {
     char *filename;
     enum sc_record_format format;
     AVFormatContext *ctx;
+    // Optional exclusively created local file, owned after assignment.
+    FILE *output_file;
 
     sc_thread thread;
     sc_mutex mutex;
     sc_cond cond;
     // set on sc_recorder_stop(), packet_sink close or recording failure
     bool stopped;
+    int64_t duration_hint;
     struct sc_recorder_queue video_queue;
     struct sc_recorder_queue audio_queue;
 
@@ -79,6 +82,9 @@ sc_recorder_start(struct sc_recorder *recorder);
 
 void
 sc_recorder_stop(struct sc_recorder *recorder);
+
+void
+sc_recorder_stop_with_duration(struct sc_recorder *recorder, int64_t duration);
 
 void
 sc_recorder_join(struct sc_recorder *recorder);

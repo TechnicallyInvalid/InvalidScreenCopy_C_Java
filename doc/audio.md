@@ -107,11 +107,12 @@ See [#4380](https://github.com/Genymobile/scrcpy/issues/4380).
 
 ## Codec
 
-The audio codec can be selected. The possible values are `opus` (default),
+The audio codec can be selected. InvalidScreenCopy defaults to `aac`.
+The possible values are `opus`,
 `aac`, `flac` and `raw` (uncompressed PCM 16-bit LE):
 
 ```bash
-scrcpy --audio-codec=opus  # default
+scrcpy --audio-codec=opus  # upstream default; InvalidScreenCopy defaults to aac
 scrcpy --audio-codec=aac
 scrcpy --audio-codec=flac
 scrcpy --audio-codec=raw

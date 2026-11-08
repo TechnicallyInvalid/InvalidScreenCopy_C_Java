@@ -24,6 +24,9 @@
 #include "keyboard_sdk.h"
 #include "mouse_sdk.h"
 #include "recorder.h"
+#ifdef __APPLE__
+#include "recording_ui.h"
+#endif
 #include "screen.h"
 #include "sdl_hints.h"
 #include "server.h"
@@ -61,6 +64,9 @@ struct scrcpy {
     struct sc_decoder audio_decoder;
     struct sc_hwdec hwdec;
     struct sc_recorder recorder;
+#ifdef __APPLE__
+    struct sc_recording recording;
+#endif
     struct sc_video_regulator video_regulator;
 #ifdef HAVE_V4L2
     struct sc_v4l2_sink v4l2_sink;
@@ -395,6 +401,10 @@ scrcpy(struct scrcpy_options *options) {
     bool server_started = false;
     bool file_pusher_initialized = false;
     bool recorder_initialized = false;
+#ifdef __APPLE__
+    bool recording_initialized = false;
+    void *recording_ui = NULL;
+#endif
     bool recorder_started = false;
 #ifdef HAVE_V4L2
     bool v4l2_sink_initialized = false;
@@ -567,9 +577,6 @@ scrcpy(struct scrcpy_options *options) {
 
     LOGD("Server connected");
 
-    // It is necessarily initialized here, since the device is connected
-    struct sc_server_info *info = &s->server.info;
-
     const char *window_title =
         options->window_title ? options->window_title : "InvalidScreenCopy";
     assert(window_title);
@@ -647,6 +654,21 @@ scrcpy(struct scrcpy_options *options) {
     }
 
     struct sc_controller *controller = NULL;
+#ifdef __APPLE__
+    if (options->window && options->video && !options->record_filename) {
+        if (!sc_recording_init(&s->recording, options->audio,
+                                options->record_orientation)) {
+            goto end;
+        }
+        recording_initialized = true;
+        sc_packet_source_add_sink(&s->video_demuxer.packet_source,
+                                   &s->recording.video.sink);
+        if (options->audio) {
+            sc_packet_source_add_sink(&s->audio_demuxer.packet_source,
+                                       &s->recording.audio.sink);
+        }
+    }
+#endif
     struct sc_key_processor *kp = NULL;
     struct sc_mouse_processor *mp = NULL;
     struct sc_gamepad_processor *gp = NULL;
@@ -847,6 +869,12 @@ aoa_complete:
             goto end;
         }
         screen_initialized = true;
+#ifdef __APPLE__
+        if (recording_initialized) {
+            recording_ui = sc_recording_ui_create(s->screen.window,
+                                                   &s->recording, controller);
+        }
+#endif
     }
 
     bool needs_video_decoder = options->video_playback;
@@ -1045,6 +1073,14 @@ aoa_complete:
     disconnected = ret == SCRCPY_EXIT_DISCONNECTED;
 
 end:
+#ifdef __APPLE__
+    if (recording_ui) {
+        sc_recording_ui_destroy(recording_ui);
+    }
+    if (recording_initialized) {
+        sc_recording_stop(&s->recording);
+    }
+#endif
     if (timeout_started) {
         sc_timeout_stop(&s->timeout);
     }
@@ -1192,6 +1228,11 @@ end:
     if (recorder_started) {
         sc_recorder_join(&s->recorder);
     }
+#ifdef __APPLE__
+    if (recording_initialized) {
+        sc_recording_destroy(&s->recording);
+    }
+#endif
     if (recorder_initialized) {
         sc_recorder_destroy(&s->recorder);
     }

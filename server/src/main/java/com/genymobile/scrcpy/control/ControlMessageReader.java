@@ -47,6 +47,7 @@ public class ControlMessageReader {
             case ControlMessage.TYPE_ROTATE_DEVICE:
             case ControlMessage.TYPE_OPEN_HARD_KEYBOARD_SETTINGS:
             case ControlMessage.TYPE_RESET_VIDEO:
+            case ControlMessage.TYPE_REQUEST_KEYFRAME:
             case ControlMessage.TYPE_CAMERA_ZOOM_IN:
             case ControlMessage.TYPE_CAMERA_ZOOM_OUT:
                 return ControlMessage.createEmpty(type);

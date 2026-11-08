@@ -200,6 +200,7 @@ sc_control_msg_serialize(const struct sc_control_msg *msg, uint8_t *buf) {
         case SC_CONTROL_MSG_TYPE_ROTATE_DEVICE:
         case SC_CONTROL_MSG_TYPE_OPEN_HARD_KEYBOARD_SETTINGS:
         case SC_CONTROL_MSG_TYPE_RESET_VIDEO:
+        case SC_CONTROL_MSG_TYPE_REQUEST_KEYFRAME:
         case SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_IN:
         case SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_OUT:
             // no additional data
@@ -335,6 +336,9 @@ sc_control_msg_log(const struct sc_control_msg *msg) {
             break;
         case SC_CONTROL_MSG_TYPE_RESET_VIDEO:
             LOG_CMSG("reset video");
+            break;
+        case SC_CONTROL_MSG_TYPE_REQUEST_KEYFRAME:
+            LOG_CMSG("request keyframe");
             break;
         case SC_CONTROL_MSG_TYPE_CAMERA_SET_TORCH:
             LOG_CMSG("camera set torch %s",

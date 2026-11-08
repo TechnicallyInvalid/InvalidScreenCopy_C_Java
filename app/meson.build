@@ -150,6 +150,13 @@ dependencies = [
     dependency('sdl3', version: '>= 3.2.0', static: static),
 ]
 
+if host_machine.system() == 'darwin'
+    add_languages('objc')
+    src += ['src/recording.c', 'src/recording_file.c', 'src/recording_ui.m']
+    dependencies += dependency('appleframeworks', modules: ['Cocoa'])
+    add_project_arguments('-fobjc-arc', language: 'objc')
+endif
+
 if v4l2_support
     dependencies += dependency('libavdevice', static: static)
 endif
@@ -331,6 +338,19 @@ if get_option('buildtype') == 'debug'
             'tests/test_vector.c',
         ]],
     ]
+
+    if host_machine.system() == 'darwin'
+        tests += [['test_recording_file', [
+            'tests/test_recording_file.c', 'src/recording_file.c',
+        ]]]
+        executable('test_recording', [
+            'tests/test_recording.c', 'src/recording.c', 'src/recording_file.c',
+            'src/recorder.c', 'src/options.c', 'src/compat.c',
+            'src/util/thread.c', 'src/util/log.c', 'src/util/str.c',
+            'src/util/strbuf.c', 'src/util/memory.c', 'src/util/tick.c',
+        ], include_directories: src_dir, dependencies: dependencies,
+           c_args: ['-DSC_TEST'])
+    endif
 
     foreach t : tests
         sources = t[1] + ['src/compat.c']

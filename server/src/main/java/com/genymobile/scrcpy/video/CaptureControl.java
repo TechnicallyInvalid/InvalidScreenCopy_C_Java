@@ -39,4 +39,12 @@ public class CaptureControl {
     public synchronized void setRunningMediaCodec(MediaCodec runningMediaCodec) {
         this.runningMediaCodec = runningMediaCodec;
     }
+
+    /** Refresh capture to guarantee a new keyframe even on a static display. */
+    public synchronized void requestKeyFrame() {
+        // A sync-frame request alone only affects the next input frame. Some
+        // devices stop submitting frames while the screen is static. Resetting
+        // capture supplies a fresh frame without closing the transport/window.
+        reset(RESET_REASON_CLIENT_RESET);
+    }
 }

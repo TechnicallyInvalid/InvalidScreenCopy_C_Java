@@ -80,3 +80,20 @@ line-by-line audit, fuzzing campaign, exploit assessment, independent binary
 reproducibility proof, CVE inventory, or packet-capture analysis. It cannot
 establish that this phone was never infected by other software. No evidence
 of a persistent scrcpy infection was found in the checks performed.
+
+## Fork changes reviewed
+
+The fork adds one no-payload control message (23) that refreshes the existing
+video capture/encoder to start a new clip on a keyframe. It adds no socket,
+permission, data source, service, or persistence to Android. Desktop Record
+also sends the existing wake-up key action when control is enabled. Client and
+server identify themselves as `5.0.1-invalid.1`, preventing accidental pairing
+with the unmodified upstream 5.0.1 server.
+
+The macOS UI stores only the selected recording-directory path in local
+NSUserDefaults. MP4 creation uses an exclusive local file descriptor and 0600
+permissions. Neither new desktop module uploads clips or performs networking.
+Failures are reported locally; partial files are retained if any video was
+captured. Recorder changes were checked for stream lifetime, mutex ordering,
+exclusive output ownership, finalization errors, and keyframe/audio boundaries.
+See [verification](VERIFICATION.md) for automated and device test evidence.
