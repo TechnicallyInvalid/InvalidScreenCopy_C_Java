@@ -97,3 +97,14 @@ Failures are reported locally; partial files are retained if any video was
 captured. Recorder changes were checked for stream lifetime, mutex ordering,
 exclusive output ownership, finalization errors, and keyframe/audio boundaries.
 See [verification](VERIFICATION.md) for automated and device test evidence.
+
+The native macOS device picker runs the existing ADB executable with
+`devices -l`, and starts the bundled display with the selected serial as a
+separate argument. It never builds a shell command from device names or
+identifiers, pairs a wireless device, or accepts debugging authorization for
+the user. An explicit `ADB` executable override is honored. Discovery and
+display logs stay on this Mac; temporary display logs have mode 0600 and are
+removed when the display exits. The last part of a failed display's log is
+shown locally for diagnosis. Closing the display requests SDL's regular quit
+path over a private pipe. The display and picker share the existing local
+recording-folder preference; Android code and capture permissions are unchanged.

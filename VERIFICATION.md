@@ -9,7 +9,8 @@ Fork protocol/build version: `5.0.1-invalid.1`.
   SDK/build-tools 36.0.0, javac 22.0.2, and D8. No precompiled scrcpy server used.
 - Desktop C and macOS Objective-C bridge compiled with Apple clang 21,
   Meson 1.12.1 and Ninja 1.13.2 on the Apple Silicon host Upsilonz.
-- All 13 Meson tests passed (12 upstream tests plus exclusive-filename tests).
+- All 14 Meson tests passed (12 upstream tests, exclusive-filename tests,
+  and the macOS device-discovery model test).
 - `scripts/test-recording.sh` passed using generated H.264/AAC fixtures.
 - Local ad-hoc app signature passed `codesign --verify --deep --strict`.
 - The linker warns that installed Homebrew SDL 3.4.20 targets macOS 27.2 while
@@ -101,6 +102,31 @@ playback was started and no speed setting or file was changed. The earlier
 display-pipeline panic remains unattributed. Further diagnosis needs a specific
 audible example/time and whether the problem occurs in saved files, live
 mirroring, or both. Application behavior and audio defaults remain unchanged.
+
+## Foreground device picker — verification in progress
+
+The macOS bundle now has a native foreground launcher with a connected-device
+table and a separately identified bundled display helper. The picker was
+observed listing the attached Pixel 8 Pro as USB / Ready and enabling Open
+Display. Selecting it started the helper with that device's explicit serial.
+The helper then stalled before recording initialization. A process sample
+located the wait in `NSFileManager.currentDirectoryPath`; the underlying
+filesystem cause was not established. The updated launcher passes the launch
+directory explicitly and starts the helper from `/`, avoiding that lookup.
+Only those stalled test processes were stopped; no recording had been started.
+
+The updated sources compile, all 14 Meson tests pass, the packaged app passes
+`codesign --verify --deep --strict`, and its native entry point forwards
+`--version` to the source-built mirror. The discovery test covers empty/error
+responses, USB/network/emulator entries, unauthorized/offline states, literal
+serials, duplicate entries, and ADB executable overrides. A read-only ADB check
+still reports the attached Pixel ready.
+
+Final UI verification is pending because the Mac was locked: the updated
+helper opening its window, Show Display, reopening a closed picker, and Close
+Display / main-app Quit while recording must still be exercised. Passing the
+parser and recorder tests does not prove those full UI lifecycle paths. No
+QuickTime interaction or changes to user recordings occurred during this work.
 
 ## Replacement and cleanup
 

@@ -26,12 +26,25 @@ and the installed AIDL, javac and D8 tools. Meson's `prebuilt_server` argument
 points to **that locally generated output**, not a downloaded upstream server.
 All original Apache-2.0 notices are retained.
 
-Open `dist/InvalidScreenCopy.app`, or run `./InvalidScreenCopy --select-usb`.
-The app bundle selects a USB device and enables stay-awake by default; the
-previous Android setting is restored at exit. The command-line launcher accepts
-the usual scrcpy options and preserves the shell's working directory. A custom
-device can be selected with `-s SERIAL`. Native libraries remain external;
-the bundle is locally ad-hoc signed, not a notarized standalone distribution.
+Open `dist/InvalidScreenCopy.app` to bring up **Connected Devices**. Select a
+ready Android phone and click **Open Display** (or double-click its row).
+The list refreshes automatically and shows USB devices, emulators, and devices
+already connected through Android wireless debugging. Unlock an unauthorized
+phone and accept its debugging prompt before opening its display.
+
+One display runs at a time. **Show Display** brings it forward; **Close Display**
+requests a normal shutdown, including finalization of any active recording.
+Closing the phone window returns to the picker. Reopening the main app from
+Finder or the Dock brings the picker forward even if its window was closed.
+The display's application menu also has **Connected Devices…** (Command-0).
+Quitting the main app waits for its display to close. Stay-awake is enabled
+while mirroring; the previous Android setting is restored at exit.
+
+The standalone `./InvalidScreenCopy --select-usb` command retains the usual
+scrcpy options and the shell's working directory. Select a particular device
+with `-s SERIAL`. The native launcher also forwards explicit command-line
+arguments to the mirror. Native libraries remain external; the bundle is
+locally ad-hoc signed, not a notarized standalone distribution.
 
 ## Record clips
 

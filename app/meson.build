@@ -155,6 +155,9 @@ if host_machine.system() == 'darwin'
     src += ['src/recording.c', 'src/recording_file.c', 'src/recording_ui.m']
     dependencies += dependency('appleframeworks', modules: ['Cocoa'])
     add_project_arguments('-fobjc-arc', language: 'objc')
+    executable('InvalidScreenCopyLauncher', [
+        'src/device_launcher.m', 'src/device_picker.m',
+    ], dependencies: dependency('appleframeworks', modules: ['Cocoa']))
 endif
 
 if v4l2_support
@@ -340,6 +343,11 @@ if get_option('buildtype') == 'debug'
     ]
 
     if host_machine.system() == 'darwin'
+        picker_test = executable('test_device_picker', [
+            'tests/test_device_picker.m', 'src/device_picker.m',
+        ], include_directories: src_dir,
+           dependencies: dependency('appleframeworks', modules: ['Foundation']))
+        test('test_device_picker', picker_test)
         tests += [['test_recording_file', [
             'tests/test_recording_file.c', 'src/recording_file.c',
         ]]]

@@ -2,6 +2,15 @@
 #include <libavutil/time.h>
 #include "recording_ui.h"
 
+static NSUserDefaults *ISCRecordingDefaults(void) {
+    static NSUserDefaults *defaults;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.technicallyinvalid.InvalidScreenCopy"];
+    });
+    return defaults;
+}
+
 // Keep clicks in the recording row out of the window's title-bar drag handling.
 @interface InvalidRecordingRow : NSView
 @end
@@ -24,15 +33,18 @@
 @property(nonatomic, strong) NSMenuItem *menuItem;
 @property(nonatomic, strong) NSMenuItem *startItem;
 @property(nonatomic, strong) NSMenuItem *stopItem;
+@property(nonatomic, strong) NSMenuItem *devicesItem;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSString *launchDirectory;
 @property(nonatomic, strong) NSString *directory;
 @property(nonatomic, strong) NSOpenPanel *folderPanel;
+@property(nonatomic, strong) NSFileHandle *launcherInput;
 - (void)refresh;
 - (void)start:(id)sender;
 - (void)stop:(id)sender;
 - (void)chooseFolder:(id)sender;
 - (void)openFolder:(id)sender;
+- (void)showDevices:(id)sender;
 - (void)useLaunchFolder:(id)sender;
 - (void)dispose;
 @end
@@ -105,7 +117,7 @@
         if (!strongSelf) return;
         if (response == NSModalResponseOK && panel.URL) {
             strongSelf.directory = panel.URL.path;
-            [[NSUserDefaults standardUserDefaults] setObject:strongSelf.directory
+            [ISCRecordingDefaults() setObject:strongSelf.directory
                 forKey:@"InvalidScreenCopyRecordingDirectory"];
         }
         strongSelf.folderPanel = nil;
@@ -115,7 +127,7 @@
 - (void)useLaunchFolder:(id)sender {
     (void)sender;
     self.directory = self.launchDirectory;
-    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"InvalidScreenCopyRecordingDirectory"];
+    [ISCRecordingDefaults() removeObjectForKey:@"InvalidScreenCopyRecordingDirectory"];
     [self refresh];
 }
 - (void)openFolder:(id)sender {
@@ -133,11 +145,18 @@
         @"Check that this folder still exists and is accessible:\n%@", self.directory];
     [alert beginSheetModalForWindow:self.window completionHandler:nil];
 }
+- (void)showDevices:(id)sender {
+    (void)sender;
+    NSString *path = NSProcessInfo.processInfo.environment[@"ISC_LAUNCHER_BUNDLE"];
+    if (path) [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path isDirectory:YES]];
+}
 - (void)dispose {
     [self.timer invalidate];
     self.timer = nil;
     [self.folderPanel cancel:nil];
+    self.launcherInput.readabilityHandler = nil;
     [NSApp.mainMenu removeItem:self.menuItem];
+    [self.devicesItem.menu removeItem:self.devicesItem];
     NSUInteger index = [self.window.titlebarAccessoryViewControllers indexOfObject:self.accessory];
     if (index != NSNotFound) {
         [self.window removeTitlebarAccessoryViewControllerAtIndex:index];
@@ -157,13 +176,15 @@ sc_recording_ui_create(SDL_Window *window, struct sc_recording *recording,
         ui.controller = controller;
         ui.window = nativeWindow;
         nativeWindow.titleVisibility = NSWindowTitleHidden;
-        ui.launchDirectory = NSFileManager.defaultManager.currentDirectoryPath;
+        NSString *launchDirectory = NSProcessInfo.processInfo.environment[@"ISC_RECORDING_LAUNCH_DIRECTORY"];
+        ui.launchDirectory = launchDirectory.isAbsolutePath ? launchDirectory
+            : NSFileManager.defaultManager.currentDirectoryPath;
         // Finder launches bundles with cwd '/'; use the app's containing folder.
         if ([ui.launchDirectory isEqualToString:@"/"]
                 && [NSBundle.mainBundle.bundlePath hasSuffix:@".app"]) {
             ui.launchDirectory = NSBundle.mainBundle.bundlePath.stringByDeletingLastPathComponent;
         }
-        ui.directory = [[NSUserDefaults standardUserDefaults] stringForKey:@"InvalidScreenCopyRecordingDirectory"]
+        ui.directory = [ISCRecordingDefaults() stringForKey:@"InvalidScreenCopyRecordingDirectory"]
             ?: ui.launchDirectory;
         ui.accessory = [[NSTitlebarAccessoryViewController alloc] init];
         ui.accessory.layoutAttribute = NSLayoutAttributeBottom;
@@ -223,12 +244,32 @@ sc_recording_ui_create(SDL_Window *window, struct sc_recording *recording,
         ui.menuItem = [[NSMenuItem alloc] initWithTitle:@"Recording" action:nil keyEquivalent:@""];
         ui.menuItem.submenu = menu;
         [NSApp.mainMenu addItem:ui.menuItem];
+        if (NSProcessInfo.processInfo.environment[@"ISC_LAUNCHER_BUNDLE"]) {
+            NSMenu *applicationMenu = NSApp.mainMenu.itemArray.firstObject.submenu;
+            ui.devicesItem = [[NSMenuItem alloc] initWithTitle:@"Connected Devices…" action:@selector(showDevices:) keyEquivalent:@"0"];
+            ui.devicesItem.target = ui;
+            [applicationMenu insertItem:ui.devicesItem atIndex:MIN(2, applicationMenu.numberOfItems)];
+        }
         __weak InvalidRecordingUI *weakUI = ui;
         ui.timer = [NSTimer timerWithTimeInterval:0.2 repeats:YES block:^(NSTimer *timer) {
             (void)timer;
             [weakUI refresh];
         }];
         [NSRunLoop.mainRunLoop addTimer:ui.timer forMode:NSRunLoopCommonModes];
+        if ([NSProcessInfo.processInfo.environment[@"ISC_LAUNCHER_PIPE"] isEqualToString:@"1"]) {
+            ui.launcherInput = NSFileHandle.fileHandleWithStandardInput;
+            ui.launcherInput.readabilityHandler = ^(NSFileHandle *handle) {
+                NSData *data = handle.availableData;
+                // EOF also closes the mirror gracefully if its launcher exits.
+                if (!data.length || memchr(data.bytes, 'q', data.length)) {
+                    handle.readabilityHandler = nil;
+                    SDL_Event event;
+                    SDL_zero(event);
+                    event.type = SDL_EVENT_QUIT;
+                    SDL_PushEvent(&event);
+                }
+            };
+        }
         [ui refresh];
         return (__bridge_retained void *)ui;
     }
