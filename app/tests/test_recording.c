@@ -16,7 +16,20 @@ configure(struct sc_packet_sink *video, struct sc_packet_sink *audio,
         AVCodecParameters *params = ctx->streams[i]->codecpar;
         struct sc_packet_sink *sink = params->codec_type == AVMEDIA_TYPE_VIDEO ? video : audio;
         if (!sink) continue;
-        assert(sink->ops->open(sink, params, NULL));
+        if (params->codec_type == AVMEDIA_TYPE_AUDIO) {
+            // Match demuxer.c: the device wire format supplies the codec and
+            // fixed audio format, not the MP4's frame size or codec profile.
+            AVCodecParameters *wire = avcodec_parameters_alloc();
+            assert(wire);
+            wire->codec_type = AVMEDIA_TYPE_AUDIO;
+            wire->codec_id = params->codec_id;
+            wire->sample_rate = 48000;
+            wire->ch_layout = (AVChannelLayout) AV_CHANNEL_LAYOUT_STEREO;
+            assert(sink->ops->open(sink, wire, NULL));
+            avcodec_parameters_free(&wire);
+        } else {
+            assert(sink->ops->open(sink, params, NULL));
+        }
         if (params->extradata_size) {
             AVPacket *config = av_packet_alloc();
             assert(config && !av_new_packet(config, params->extradata_size));
@@ -44,6 +57,8 @@ feed(struct sc_packet_sink *video, struct sc_packet_sink *audio,
             continue;
         }
         av_packet_rescale_ts(packet, stream->time_base, (AVRational){1, 1000000});
+        // Android sends presentation timestamps but no packet durations.
+        packet->duration = 0;
         sink->ops->push(sink, packet);
         av_packet_unref(packet);
     }
