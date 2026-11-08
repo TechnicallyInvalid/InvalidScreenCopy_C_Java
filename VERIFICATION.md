@@ -103,30 +103,60 @@ display-pipeline panic remains unattributed. Further diagnosis needs a specific
 audible example/time and whether the problem occurs in saved files, live
 mirroring, or both. Application behavior and audio defaults remain unchanged.
 
-## Foreground device picker — verification in progress
+## Foreground device picker — verified 2026-11-08
 
-The macOS bundle now has a native foreground launcher with a connected-device
-table and a separately identified bundled display helper. The picker was
-observed listing the attached Pixel 8 Pro as USB / Ready and enabling Open
-Display. Selecting it started the helper with that device's explicit serial.
-The helper then stalled before recording initialization. A process sample
-located the wait in `NSFileManager.currentDirectoryPath`; the underlying
-filesystem cause was not established. The updated launcher passes the launch
-directory explicitly and starts the helper from `/`, avoiding that lookup.
-Only those stalled test processes were stopped; no recording had been started.
-
-The updated sources compile, all 14 Meson tests pass, the packaged app passes
-`codesign --verify --deep --strict`, and its native entry point forwards
+The native macOS launcher was exercised with the attached Pixel 8 Pro over USB.
+All 14 Meson tests pass, the packaged app passes
+`codesign --verify --deep --strict`, and the native entry point forwards
 `--version` to the source-built mirror. The discovery test covers empty/error
 responses, USB/network/emulator entries, unauthorized/offline states, literal
-serials, duplicate entries, and ADB executable overrides. A read-only ADB check
-still reports the attached Pixel ready.
+serials, duplicate entries, and ADB executable overrides. Only one physical
+USB phone was available for the UI tests; wireless and multiple-device
+selection were not exercised on hardware.
 
-Final UI verification is pending because the Mac was locked: the updated
-helper opening its window, Show Display, reopening a closed picker, and Close
-Display / main-app Quit while recording must still be exercised. Passing the
-parser and recorder tests does not prove those full UI lifecycle paths. No
-QuickTime interaction or changes to user recordings occurred during this work.
+Observed through the native macOS UI:
+
+- The foreground picker lists the phone as USB / Ready. Open Display starts
+  the selected phone's mirror with the native recording controls visible.
+- Show Display returns to the mirror. Connected Devices returns to the picker,
+  including after its window has been closed. Opening the app again in Finder
+  also restores a closed picker window.
+- Record / Stop saves a clip. Choose Folder updates the destination, that
+  preference survives a new display session, and Open Folder opens it in Finder.
+- Close Display during recording finalizes the clip and returns to the ready
+  picker. Quitting the main app during recording finalizes the clip and both
+  app processes exit. Closing the display window also returns to the picker.
+
+The launcher passes the recording launch directory explicitly and starts the
+display from `/`; this avoids the previously observed startup wait in
+`NSFileManager.currentDirectoryPath`. A separate test exposed a synchronous
+`NSWorkspace.openURL` wait inside LaunchServices when returning to the picker.
+The display now activates the existing launcher by process ID instead, and the
+launcher restores its window on activation. Return-to-picker and recording
+shutdown succeeded after this correction. These observations do not establish
+the underlying OS cause of either wait or the earlier kernel panic.
+
+Four new clips were saved in an isolated temporary folder, with mode 0600:
+
+| Stop path | Duration | Video/audio end difference |
+| --- | ---: | ---: |
+| Stop Recording | 23.237 s | 0.006 ms |
+| Stream EOF during recovery from the LaunchServices hang | 163.105 s | 72.772 ms |
+| Close Display on the corrected build | 8.455 s | 0.001 ms |
+| Main-app Quit on the corrected build | 5.588 s | 82.506 ms |
+
+Every clip fully decoded as H.264 plus 48 kHz stereo AAC. Stored packet DTS
+values increase strictly within each stream. For the long variable-frame-rate
+recovery clip, the decoder check used `-enc_time_base:v demux` to avoid rounding
+distinct video timestamps to the null output's inferred frame-rate clock.
+The hung test's Android server alone was stopped to deliver EOF; its MP4 was
+confirmed finalized before terminating the blocked Mac test display.
+
+The original recording-folder preference was restored and verified. Existing
+recordings were not modified or uploaded. The app was left at the foreground
+picker, ready to open the phone. QuickTime was not operated during these tests.
+These checks verify recording integrity and lifecycle behavior; the reported
+muffled/slow audio remains unresolved as described above.
 
 ## Replacement and cleanup
 

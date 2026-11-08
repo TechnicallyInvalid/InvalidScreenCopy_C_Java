@@ -106,5 +106,6 @@ the user. An explicit `ADB` executable override is honored. Discovery and
 display logs stay on this Mac; temporary display logs have mode 0600 and are
 removed when the display exits. The last part of a failed display's log is
 shown locally for diagnosis. Closing the display requests SDL's regular quit
-path over a private pipe. The display and picker share the existing local
+path over a private pipe. Returning to the picker activates the already-running
+launcher by its process ID. The display and picker share the existing local
 recording-folder preference; Android code and capture permissions are unchanged.

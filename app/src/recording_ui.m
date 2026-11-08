@@ -147,8 +147,16 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 }
 - (void)showDevices:(id)sender {
     (void)sender;
-    NSString *path = NSProcessInfo.processInfo.environment[@"ISC_LAUNCHER_BUNDLE"];
-    if (path) [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path isDirectory:YES]];
+    pid_t pid = [NSProcessInfo.processInfo.environment[@"ISC_LAUNCHER_PID"] intValue];
+    if (pid <= 0) return;
+    NSRunningApplication *launcher = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    if (!launcher || launcher.terminated) return;
+    // Reopening the bundle synchronously can block the SDL event loop inside
+    // LaunchServices. Activate our already-running parent by process ID instead.
+    if (@available(macOS 14.0, *)) {
+        [NSApp yieldActivationToApplication:launcher];
+        [launcher activateFromApplication:NSRunningApplication.currentApplication options:NSApplicationActivateAllWindows];
+    } else [launcher activateWithOptions:NSApplicationActivateAllWindows];
 }
 - (void)dispose {
     [self.timer invalidate];
@@ -244,7 +252,7 @@ sc_recording_ui_create(SDL_Window *window, struct sc_recording *recording,
         ui.menuItem = [[NSMenuItem alloc] initWithTitle:@"Recording" action:nil keyEquivalent:@""];
         ui.menuItem.submenu = menu;
         [NSApp.mainMenu addItem:ui.menuItem];
-        if (NSProcessInfo.processInfo.environment[@"ISC_LAUNCHER_BUNDLE"]) {
+        if ([NSProcessInfo.processInfo.environment[@"ISC_LAUNCHER_PID"] intValue] > 0) {
             NSMenu *applicationMenu = NSApp.mainMenu.itemArray.firstObject.submenu;
             ui.devicesItem = [[NSMenuItem alloc] initWithTitle:@"Connected Devices…" action:@selector(showDevices:) keyEquivalent:@"0"];
             ui.devicesItem.target = ui;

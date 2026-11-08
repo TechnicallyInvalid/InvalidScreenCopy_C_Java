@@ -12,7 +12,6 @@ static NSMutableDictionary *ISCEnvironment(void) {
     NSMutableDictionary *environment = NSProcessInfo.processInfo.environment.mutableCopy;
     environment[@"SCRCPY_SERVER_PATH"] = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"scrcpy-server"];
     environment[@"SCRCPY_ICON_DIR"] = NSBundle.mainBundle.resourcePath;
-    environment[@"ISC_LAUNCHER_BUNDLE"] = NSBundle.mainBundle.bundlePath;
     NSString *adb = ISCFindADB(environment);
     if (adb) environment[@"ADB"] = adb;
     return environment;
@@ -182,6 +181,14 @@ static NSMutableDictionary *ISCEnvironment(void) {
     return YES;
 }
 
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    (void)notification;
+    // The display activates this existing process directly. Restore a closed
+    // or minimized picker without opening the bundle again through LaunchServices.
+    [self.window deminiaturize:nil];
+    [self.window makeKeyAndOrderFront:nil];
+}
+
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app {
     (void)app;
     return NO;
@@ -325,6 +332,7 @@ static NSMutableDictionary *ISCEnvironment(void) {
         @"--window-title", [@"InvalidScreenCopy — " stringByAppendingString:device.name]];
     NSMutableDictionary *environment = ISCEnvironment();
     environment[@"ISC_LAUNCHER_PIPE"] = @"1";
+    environment[@"ISC_LAUNCHER_PID"] = [NSString stringWithFormat:@"%d", getpid()];
     environment[@"ISC_RECORDING_LAUNCH_DIRECTORY"] = self.launchDirectory;
     task.environment = environment;
     // Resolving an inherited cwd inside a protected/unavailable folder can
@@ -444,7 +452,7 @@ int main(int argc, char **argv) {
         // Explicit command-line arguments retain the existing CLI behavior.
         if (argc > 1 && strncmp(argv[1], "-psn_", 5)) {
             NSDictionary *environment = ISCEnvironment();
-            for (NSString *key in @[@"ADB", @"SCRCPY_SERVER_PATH", @"SCRCPY_ICON_DIR", @"ISC_LAUNCHER_BUNDLE"]) {
+            for (NSString *key in @[@"ADB", @"SCRCPY_SERVER_PATH", @"SCRCPY_ICON_DIR"]) {
                 NSString *value = environment[key];
                 if (value) setenv(key.UTF8String, value.UTF8String, 1);
             }
