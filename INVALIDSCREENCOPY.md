@@ -57,7 +57,7 @@ locally ad-hoc signed, not a notarized standalone distribution.
   next clip; an active clip stays in its original file.
 - Click **Open Folder** or choose **Recording → Open Current Folder** to open
   the selected recording directory in Finder. Status appears centered above
-  the four buttons.
+  the recording and screenshot controls.
 - **Use Launch Folder** clears that preference. The default is the shell's
   working directory; for Finder launches with cwd `/`, it is the folder
   containing the app bundle. Hover over the status/buttons to see full paths.
@@ -88,6 +88,22 @@ With `--no-control`, the UI cannot wake the screen or refresh the encoder and
 must wait for a natural keyframe. Explicit codec overrides must be MP4-compatible.
 Other platforms retain the original CLI workflow; their new builds were not
 tested in this macOS task.
+
+## Capture screenshots
+
+- **Copy Screenshot** copies the currently displayed phone image to the Mac
+  clipboard, with PNG and TIFF representations for pasting into image-aware apps.
+- **Save Screenshot** writes a PNG into the same folder selected for videos.
+  Names use `YYYY-MM-DD-HH-MM-SS-MSS.png`; collisions add `-001`, `-002`, etc.
+  Existing files are never overwritten, and new images have mode 0600.
+
+These are buttons only: no keyboard shortcuts are added or reassigned.
+The screenshot contains the displayed phone pixels at the current rendered
+resolution, without the native controls or letterbox borders. It uses the
+current display texture and its orientation, including the frozen image when
+display playback is paused. No new frame or Android screenshot command is
+requested. Buttons are disabled until a phone image is available and while a
+folder/error dialog is open. Both actions work during video recording.
 
 Recordings remain local. See [the review](SECURITY_REVIEW.md) for the precise
 security scope and the remaining dependency and ADB trust assumptions.

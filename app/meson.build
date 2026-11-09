@@ -152,7 +152,7 @@ dependencies = [
 
 if host_machine.system() == 'darwin'
     add_languages('objc')
-    src += ['src/recording.c', 'src/recording_file.c', 'src/recording_ui.m']
+    src += ['src/recording.c', 'src/recording_file.c', 'src/recording_ui.m', 'src/screenshot.m']
     dependencies += dependency('appleframeworks', modules: ['Cocoa'])
     add_project_arguments('-fobjc-arc', language: 'objc')
     executable('InvalidScreenCopyLauncher', [
@@ -348,6 +348,10 @@ if get_option('buildtype') == 'debug'
         ], include_directories: src_dir,
            dependencies: dependency('appleframeworks', modules: ['Foundation']))
         test('test_device_picker', picker_test)
+        screenshot_test = executable('test_screenshot', [
+            'tests/test_screenshot.m', 'src/screenshot.m', 'src/recording_file.c',
+        ], include_directories: src_dir, dependencies: dependencies)
+        test('test_screenshot', screenshot_test)
         tests += [['test_recording_file', [
             'tests/test_recording_file.c', 'src/recording_file.c',
         ]]]

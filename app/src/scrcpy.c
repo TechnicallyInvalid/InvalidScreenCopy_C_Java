@@ -871,7 +871,7 @@ aoa_complete:
         screen_initialized = true;
 #ifdef __APPLE__
         if (recording_initialized) {
-            recording_ui = sc_recording_ui_create(s->screen.window,
+            recording_ui = sc_recording_ui_create(&s->screen,
                                                    &s->recording, controller);
         }
 #endif

@@ -109,3 +109,12 @@ shown locally for diagnosis. Closing the display requests SDL's regular quit
 path over a private pipe. Returning to the picker activates the already-running
 launcher by its process ID. The display and picker share the existing local
 recording-folder preference; Android code and capture permissions are unchanged.
+
+Screenshot additions reviewed 2026-11-09 read the existing SDL-rendered phone
+image before presentation. They do not capture other Mac windows, request an
+OS screen-recording permission, add Android commands, or change keyboard input
+handling. PNG encoding uses the existing Cocoa/SDL dependencies. Copy explicitly
+replaces the Mac clipboard with image data; Save writes only to the selected
+recording directory using the same exclusive timestamp-file creation as videos.
+Failed writes remove only the newly created incomplete PNG. No screenshot
+upload or additional network connection is introduced.

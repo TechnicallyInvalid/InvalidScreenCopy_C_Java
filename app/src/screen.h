@@ -176,6 +176,13 @@ sc_screen_destroy(struct sc_screen *screen);
 void
 sc_screen_hide_window(struct sc_screen *screen);
 
+// Main thread only. Captures the displayed phone pixels (no window controls).
+// The caller owns the surface and must call SDL_DestroySurface().
+bool
+sc_screen_can_capture(struct sc_screen *screen);
+SDL_Surface *
+sc_screen_capture(struct sc_screen *screen);
+
 // toggle the fullscreen mode
 void
 sc_screen_toggle_fullscreen(struct sc_screen *screen);

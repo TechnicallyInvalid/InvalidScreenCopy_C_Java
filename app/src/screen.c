@@ -257,7 +257,8 @@ sc_screen_update_content_rect(struct sc_screen *screen) {
 // Set the update_content_rect flag if the window or content size may have
 // changed, so that the content rectangle is recomputed
 static void
-sc_screen_render(struct sc_screen *screen, bool update_content_rect) {
+sc_screen_render_internal(struct sc_screen *screen, bool update_content_rect,
+                          SDL_Surface **capture) {
     assert(screen->window_shown);
 
     if (update_content_rect) {
@@ -265,6 +266,7 @@ sc_screen_render(struct sc_screen *screen, bool update_content_rect) {
     }
 
     SDL_Renderer *renderer = screen->renderer;
+    bool ok = false;
     struct sc_screen_bg_color bg = screen->bg;
     SDL_SetRenderDrawColor(renderer, bg.r, bg.g, bg.b, 0);
     sc_sdl_render_clear(renderer);
@@ -303,7 +305,6 @@ sc_screen_render(struct sc_screen *screen, bool update_content_rect) {
         srcrect = &frame_rect;
     }
 
-    bool ok = false;
     if (orientation == SC_ORIENTATION_0) {
         // always align to a physical pixel
         geometry.x = (int32_t) geometry.x;
@@ -339,8 +340,40 @@ sc_screen_render(struct sc_screen *screen, bool update_content_rect) {
         LOGE("Could not render texture: %s", SDL_GetError());
     }
 
+    if (capture && ok) {
+        // Read before Present(), when the backbuffer is defined. This uses
+        // exactly the current texture/orientation, including a paused display,
+        // and excludes the native controls and letterbox borders. SDL clips
+        // the rectangle to the viewport for the unscaled/cropped display mode.
+        SDL_Rect area = {(int) geometry.x, (int) geometry.y,
+                         (int) geometry.w, (int) geometry.h};
+        *capture = SDL_RenderReadPixels(renderer, &area);
+    }
+
 end:
     sc_sdl_render_present(renderer);
+}
+
+static void
+sc_screen_render(struct sc_screen *screen, bool update_content_rect) {
+    sc_screen_render_internal(screen, update_content_rect, NULL);
+}
+
+bool
+sc_screen_can_capture(struct sc_screen *screen) {
+    return screen->video && screen->window_shown && !screen->disconnected
+        && !screen->is_icon_active && sc_texture_get(&screen->tex);
+}
+
+SDL_Surface *
+sc_screen_capture(struct sc_screen *screen) {
+    if (!sc_screen_can_capture(screen)) {
+        SDL_SetError("No phone image is available yet.");
+        return NULL;
+    }
+    SDL_Surface *capture = NULL;
+    sc_screen_render_internal(screen, true, &capture);
+    return capture;
 }
 
 static void

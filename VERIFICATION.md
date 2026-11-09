@@ -1,4 +1,4 @@
-# Verification — 2026-11-08 UTC
+# Verification
 
 Upstream base: `a0c27ff382c411af1301dcc1cd8205c9aeb81996` (v5.0.1).
 Fork protocol/build version: `5.0.1-invalid.1`.
@@ -9,8 +9,8 @@ Fork protocol/build version: `5.0.1-invalid.1`.
   SDK/build-tools 36.0.0, javac 22.0.2, and D8. No precompiled scrcpy server used.
 - Desktop C and macOS Objective-C bridge compiled with Apple clang 21,
   Meson 1.12.1 and Ninja 1.13.2 on the Apple Silicon host Upsilonz.
-- All 14 Meson tests passed (12 upstream tests, exclusive-filename tests,
-  and the macOS device-discovery model test).
+- All 15 Meson tests passed (12 upstream tests, exclusive-filename tests,
+  the macOS device-discovery model test, and screenshot tests).
 - `scripts/test-recording.sh` passed using generated H.264/AAC fixtures.
 - Local ad-hoc app signature passed `codesign --verify --deep --strict`.
 - The linker warns that installed Homebrew SDL 3.4.20 targets macOS 27.2 while
@@ -157,6 +157,35 @@ recordings were not modified or uploaded. The app was left at the foreground
 picker, ready to open the phone. QuickTime was not operated during these tests.
 These checks verify recording integrity and lifecycle behavior; the reported
 muffled/slow audio remains unresolved as described above.
+
+## Screenshot buttons — 2026-11-09
+
+The macOS mirror now has Copy Screenshot and Save Screenshot buttons, with no
+new keyboard bindings or changes to Android text-copy handling. The updated
+client builds and its packaged signature passes verification. All 15 automated
+tests pass. Screenshot tests round-trip a non-square, padded-row RGBA fixture
+through PNG and check exact pixel values, dimensions, and row ordering. They
+also check missing image/folder errors, same-millisecond name collisions,
+symlink collisions, preservation of existing image bytes, and mode 0600.
+
+On the attached Pixel, Save Screenshot produced a readable 1778×3958 PNG in
+the selected temporary test folder. Visual inspection confirmed phone content
+without the Mac controls. Copy Screenshot produced an image that opened through
+Preview's New from Clipboard command; Preview reported the same dimensions and
+sRGB color. The clipboard test image was saved locally in the temporary folder.
+No QuickTime action was taken.
+
+Save and Copy were both exercised during an active video recording. Recording
+remained active, Stop finalized the MP4, and all H.264/AAC data decoded with
+`ffmpeg -xerror -enc_time_base:v demux`. The clip lasted 10.9048 seconds and
+contained 48 kHz AAC audio. Buttons were observed disabled while the folder
+chooser was open. The original folder preference was restored and verified
+after reopening the display; existing recordings were not modified. Images
+and video from these tests remain local and are not committed.
+
+Portrait capture and clipboard interoperability were exercised on hardware.
+The code uses the same render path for rotation, mirroring, and paused display,
+but those variations were not independently confirmed in this UI test.
 
 ## Replacement and cleanup
 
