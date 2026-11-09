@@ -56,8 +56,8 @@ locally ad-hoc signed, not a notarized standalone distribution.
   Cancel leaves the previous choice untouched. A folder change affects the
   next clip; an active clip stays in its original file.
 - Click **Open Folder** or choose **Recording → Open Current Folder** to open
-  the selected recording directory in Finder. Status appears centered above
-  the recording and screenshot controls.
+  the selected recording directory in Finder. All six buttons share the second
+  header row, with status centered above them and clear of macOS title-bar indicators.
 - **Use Launch Folder** clears that preference. The default is the shell's
   working directory; for Finder launches with cwd `/`, it is the folder
   containing the app bundle. Hover over the status/buttons to see full paths.

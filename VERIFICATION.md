@@ -187,6 +187,12 @@ Portrait capture and clipboard interoperability were exercised on hardware.
 The code uses the same render path for rotation, mirroring, and paused display,
 but those variations were not independently confirmed in this UI test.
 
+The final layout places all six controls on one lower header row and keeps the
+status centered above them. The minimum window width is 806 points so buttons
+remain visible. The rebuilt, signature-verified app was reopened on the phone;
+visual inspection confirmed every button fits below the macOS screen-sharing
+indicator without overlap. No keyboard bindings were added or reassigned.
+
 ## Replacement and cleanup
 
 `brew uninstall --formula scrcpy` succeeded for 5.0.1, with automatic dependency

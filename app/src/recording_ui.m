@@ -263,9 +263,10 @@ sc_recording_ui_create(struct sc_screen *screen, struct sc_recording *recording,
             ?: ui.launchDirectory;
         ui.accessory = [[NSTitlebarAccessoryViewController alloc] init];
         ui.accessory.layoutAttribute = NSLayoutAttributeBottom;
-        // Two button rows keep all controls usable in a narrow phone window.
+        // All controls stay below the native title/status line, where macOS
+        // places its screen-sharing indicator. Keep the full row visible.
         NSSize minimumSize = nativeWindow.minSize;
-        minimumSize.width = MAX(minimumSize.width, 502);
+        minimumSize.width = MAX(minimumSize.width, 806);
         nativeWindow.minSize = minimumSize;
         NSRect windowFrame = nativeWindow.frame;
         if (windowFrame.size.width < minimumSize.width) {
@@ -273,28 +274,28 @@ sc_recording_ui_create(struct sc_screen *screen, struct sc_recording *recording,
             [nativeWindow setFrame:windowFrame display:YES];
         }
         CGFloat rowWidth = nativeWindow.contentView.bounds.size.width;
-        NSView *view = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 98)];
-        [view.heightAnchor constraintEqualToConstant:98].active = YES;
-        ui.accessory.fullScreenMinHeight = 98;
+        NSView *view = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 66)];
+        [view.heightAnchor constraintEqualToConstant:66].active = YES;
+        ui.accessory.fullScreenMinHeight = 66;
         ui.recordButton = [NSButton buttonWithTitle:@"● Record" target:ui action:@selector(start:)];
-        ui.recordButton.frame = NSMakeRect(12, 36, 90, 28);
+        ui.recordButton.frame = NSMakeRect(12, 4, 90, 28);
         ui.recordButton.accessibilityLabel = @"Record";
         ui.stopButton = [NSButton buttonWithTitle:@"■ Stop Recording" target:ui action:@selector(stop:)];
-        ui.stopButton.frame = NSMakeRect(108, 36, 142, 28);
+        ui.stopButton.frame = NSMakeRect(108, 4, 142, 28);
         ui.stopButton.accessibilityLabel = @"Stop Recording";
         NSButton *chooseFolder = [NSButton buttonWithTitle:@"Choose Folder" target:ui action:@selector(chooseFolder:)];
-        chooseFolder.frame = NSMakeRect(258, 36, 116, 28);
+        chooseFolder.frame = NSMakeRect(258, 4, 116, 28);
         chooseFolder.toolTip = @"Choose where videos and screenshots are saved";
         ui.openFolderButton = [NSButton buttonWithTitle:@"Open Folder" target:ui action:@selector(openFolder:)];
-        ui.openFolderButton.frame = NSMakeRect(382, 36, 108, 28);
+        ui.openFolderButton.frame = NSMakeRect(382, 4, 108, 28);
         ui.screenshotCopyButton = [NSButton buttonWithTitle:@"Copy Screenshot" target:ui action:@selector(copyScreenshot:)];
-        ui.screenshotCopyButton.frame = NSMakeRect(12, 4, 156, 28);
+        ui.screenshotCopyButton.frame = NSMakeRect(498, 4, 144, 28);
         ui.screenshotCopyButton.toolTip = @"Copy the displayed phone image to the clipboard";
         ui.saveScreenshotButton = [NSButton buttonWithTitle:@"Save Screenshot" target:ui action:@selector(saveScreenshot:)];
-        ui.saveScreenshotButton.frame = NSMakeRect(176, 4, 156, 28);
+        ui.saveScreenshotButton.frame = NSMakeRect(650, 4, 144, 28);
         ui.status = [NSTextField labelWithString:@"Waiting for the video stream…"];
         // Symmetric insets center status text while leaving native controls clear.
-        ui.status.frame = NSMakeRect(80, 70, rowWidth - 160, 20);
+        ui.status.frame = NSMakeRect(80, 38, rowWidth - 160, 20);
         ui.status.autoresizingMask = NSViewWidthSizable;
         ui.status.alignment = NSTextAlignmentCenter;
         ui.status.lineBreakMode = NSLineBreakByTruncatingMiddle;
