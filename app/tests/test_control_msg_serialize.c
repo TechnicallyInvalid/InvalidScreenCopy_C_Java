@@ -537,6 +537,35 @@ static void test_serialize_scan_file(void) {
     assert(!memcmp(buf, expected, sizeof(expected)));
 }
 
+static void test_serialize_microphone_controls(void) {
+    // Pin wire IDs independently of the enums: these bytes are consumed by
+    // the Android Java reader, so accidental enum reordering must fail tests.
+    struct sc_control_msg msg = {
+        .type = SC_CONTROL_MSG_TYPE_SET_ANDROID_MIC,
+        .set_android_mic = {.enabled = true, .session = 0x89abcdef},
+    };
+    uint8_t buffer[SC_CONTROL_MSG_MAX_SIZE];
+    const uint8_t start[] = {24, 1, 0x89, 0xab, 0xcd, 0xef};
+    assert(sc_control_msg_serialize(&msg, buffer) == sizeof(start));
+    assert(!memcmp(buffer, start, sizeof(start)));
+    assert(sc_control_msg_is_droppable(&msg));
+    msg.set_android_mic.enabled = false;
+    const uint8_t stop[] = {24, 0, 0x89, 0xab, 0xcd, 0xef};
+    assert(sc_control_msg_serialize(&msg, buffer) == sizeof(stop));
+    assert(!memcmp(buffer, stop, sizeof(stop)));
+    assert(!sc_control_msg_is_droppable(&msg));
+    sc_control_msg_destroy(&msg);
+
+    msg.type = SC_CONTROL_MSG_TYPE_CLOCK_QUERY;
+    msg.clock_query.session = 0x89abcdef;
+    msg.clock_query.sequence = 0x01020304;
+    const uint8_t clock[] = {25, 0x89, 0xab, 0xcd, 0xef, 1, 2, 3, 4};
+    assert(sc_control_msg_serialize(&msg, buffer) == sizeof(clock));
+    assert(!memcmp(buffer, clock, sizeof(clock)));
+    assert(sc_control_msg_is_droppable(&msg));
+    sc_control_msg_destroy(&msg);
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -566,5 +595,6 @@ int main(int argc, char *argv[]) {
     test_serialize_camera_zoom_out();
     test_serialize_resize_display();
     test_serialize_scan_file();
+    test_serialize_microphone_controls();
     return 0;
 }

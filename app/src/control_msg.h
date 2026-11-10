@@ -51,6 +51,8 @@ enum sc_control_msg_type {
     SC_CONTROL_MSG_TYPE_RESIZE_DISPLAY,
     SC_CONTROL_MSG_TYPE_SCAN_FILE,
     SC_CONTROL_MSG_TYPE_REQUEST_KEYFRAME,
+    SC_CONTROL_MSG_TYPE_SET_ANDROID_MIC,
+    SC_CONTROL_MSG_TYPE_CLOCK_QUERY,
 };
 
 enum sc_copy_key {
@@ -129,6 +131,14 @@ struct sc_control_msg {
         struct {
             char *path; // owned, to be freed by free()
         } scan_file;
+        struct {
+            bool enabled;
+            uint32_t session;
+        } set_android_mic;
+        struct {
+            uint32_t session;
+            uint32_t sequence;
+        } clock_query;
     };
 };
 

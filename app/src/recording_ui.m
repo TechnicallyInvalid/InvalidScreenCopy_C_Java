@@ -2,6 +2,7 @@
 #include <libavutil/time.h>
 #include "recording_ui.h"
 #include "screen.h"
+#include "local_microphone.h"
 #import "screenshot.h"
 
 static NSUserDefaults *ISCRecordingDefaults(void) {
@@ -31,6 +32,8 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 @property(nonatomic, strong) NSTitlebarAccessoryViewController *accessory;
 @property(nonatomic, strong) NSButton *recordButton;
 @property(nonatomic, strong) NSButton *stopButton;
+@property(nonatomic, strong) NSButton *androidMicButton;
+@property(nonatomic, strong) NSButton *localMicButton;
 @property(nonatomic, strong) NSButton *openFolderButton;
 @property(nonatomic, strong) NSButton *screenshotCopyButton;
 @property(nonatomic, strong) NSButton *saveScreenshotButton;
@@ -49,6 +52,7 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 @property(nonatomic, assign) BOOL openingFolder;
 @property(nonatomic, assign) BOOL savingScreenshot;
 @property(nonatomic, assign) BOOL disposed;
+@property(nonatomic, assign) BOOL microphonePermissionPending;
 - (void)refresh;
 - (void)start:(id)sender;
 - (void)stop:(id)sender;
@@ -59,6 +63,8 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 - (void)dispose;
 - (void)copyScreenshot:(id)sender;
 - (void)saveScreenshot:(id)sender;
+- (void)toggleAndroidMic:(id)sender;
+- (void)toggleLocalMic:(id)sender;
 @end
 
 @implementation InvalidRecordingUI
@@ -80,10 +86,28 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
         sc_controller_push_msg(self.controller, &message);
     }
     bool canStop = sc_recording_can_stop(self.recording);
-    self.recordButton.enabled = ready && !active;
+    self.recordButton.enabled = ready && !active && !self.microphonePermissionPending;
     self.stopButton.enabled = canStop;
-    self.startItem.enabled = ready && !active;
+    self.startItem.enabled = self.recordButton.enabled;
     self.stopItem.enabled = canStop;
+    bool androidMic, localMic;
+    sc_recording_get_microphones(self.recording, &androidMic, &localMic);
+    self.androidMicButton.state = androidMic ? NSControlStateValueOn : NSControlStateValueOff;
+    self.localMicButton.state = localMic ? NSControlStateValueOn : NSControlStateValueOff;
+    BOOL microphonesAvailable = sc_recording_microphones_available(self.recording);
+    BOOL canSelectMicrophones = microphonesAvailable
+        && !active && !self.microphonePermissionPending;
+    self.androidMicButton.enabled = canSelectMicrophones;
+    self.localMicButton.enabled = canSelectMicrophones;
+    NSString *microphoneExplanation = active
+        ? @"Microphone selections are fixed for this clip. Stop Recording before changing them."
+        : @"Android device audio is always included. Selected microphones open only while recording; microphone audio is not played through the Mac speakers.";
+    if (!microphonesAvailable)
+        microphoneExplanation = @"Microphone recording requires device-output audio, phone control, and synchronized device timing. Other audio-source modes are unavailable here.";
+    self.androidMicButton.toolTip = microphoneExplanation;
+    self.localMicButton.toolTip = self.microphonePermissionPending
+        ? @"Waiting for your macOS microphone permission decision; no microphone is open."
+        : microphoneExplanation;
     BOOL canCapture = sc_screen_can_capture(self.screen) && !self.window.attachedSheet;
     self.screenshotCopyButton.enabled = canCapture;
     self.saveScreenshotButton.enabled = canCapture && !self.savingScreenshot;
@@ -102,7 +126,11 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
         fullDetail = [detail stringByAppendingFormat:@"\n%@", fullDetail];
     }
     self.status.stringValue = detail;
-    self.status.toolTip = [fullDetail stringByAppendingFormat:@"\nFolder: %@", self.directory];
+    self.status.toolTip = [fullDetail stringByAppendingFormat:
+        @"\n%@ · Android Mic %@ · Local Mic %@\n%@\nFolder: %@",
+        microphonesAvailable ? @"Device audio included" : @"Microphone options unavailable",
+        androidMic ? @"selected" : @"off", localMic ? @"selected" : @"off",
+        microphoneExplanation, self.directory];
     self.status.textColor = active ? NSColor.systemRedColor : NSColor.secondaryLabelColor;
     self.recordButton.toolTip = [@"Save a new MP4 in " stringByAppendingString:self.directory];
     self.openFolderButton.toolTip = [@"Open in Finder: " stringByAppendingString:self.directory];
@@ -175,9 +203,66 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 }
 - (void)start:(id)sender {
     (void)sender;
+    if (self.microphonePermissionPending || self.disposed) return;
     sc_recording_request_start(self.recording, self.directory.fileSystemRepresentation,
                                 av_gettime() / 1000);
     [self refresh];
+}
+- (void)toggleAndroidMic:(id)sender {
+    (void)sender;
+    if (self.disposed || self.microphonePermissionPending) return;
+    bool androidMic, localMic;
+    sc_recording_get_microphones(self.recording, &androidMic, &localMic);
+    if (sc_recording_set_microphones(self.recording, !androidMic, localMic)) {
+        sc_recording_set_status(self.recording, !androidMic
+            ? "Android Mic selected for the next recording; device audio stays included."
+            : "Android Mic off; device audio stays included.");
+    }
+    [self refresh];
+}
+- (void)toggleLocalMic:(id)sender {
+    (void)sender;
+    if (self.disposed || self.microphonePermissionPending) return;
+    bool androidMic, localMic;
+    sc_recording_get_microphones(self.recording, &androidMic, &localMic);
+    if (localMic) {
+        if (sc_recording_set_microphones(self.recording, androidMic, false))
+            sc_recording_set_status(self.recording, "Local Mic off; device audio stays included.");
+        [self refresh];
+        return;
+    }
+    bool ready, active;
+    char status[1024];
+    sc_recording_poll(self.recording, &ready, &active, status, sizeof(status));
+    if (active || !sc_recording_microphones_available(self.recording)) {
+        [self refresh];
+        return;
+    }
+    self.microphonePermissionPending = YES;
+    sc_recording_set_status(self.recording, "Waiting for Local Mic permission; no microphone is open.");
+    [self refresh];
+    __weak InvalidRecordingUI *weakSelf = self;
+    // This is the only permission-request call site. App launch, refresh,
+    // Record, the Android Mic toggle, and tests never request microphone access.
+    sc_local_microphone_request_permission(^(enum sc_local_microphone_permission permission) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            InvalidRecordingUI *owner = weakSelf;
+            if (!owner || owner.disposed) return;
+            owner.microphonePermissionPending = NO;
+            bool selectedAndroid, selectedLocal;
+            sc_recording_get_microphones(owner.recording, &selectedAndroid, &selectedLocal);
+            if (permission == SC_LOCAL_MIC_AUTHORIZED) {
+                if (sc_recording_set_microphones(owner.recording, selectedAndroid, true))
+                    sc_recording_set_status(owner.recording, "Local Mic selected for the next recording; device audio stays included.");
+            } else {
+                sc_recording_set_microphones(owner.recording, selectedAndroid, false);
+                sc_recording_set_status(owner.recording, permission == SC_LOCAL_MIC_RESTRICTED
+                    ? "Local Mic is restricted by macOS. It remains off."
+                    : "Local Mic permission denied. It remains off; allow access in macOS System Settings to enable it.");
+            }
+            [owner refresh];
+        });
+    });
 }
 - (void)stop:(id)sender {
     (void)sender;
@@ -307,7 +392,7 @@ sc_recording_ui_create(struct sc_screen *screen, struct sc_recording *recording,
         NSView *view = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 82)];
         [view.heightAnchor constraintEqualToConstant:82].active = YES;
         ui.accessory.fullScreenMinHeight = 82;
-        // Keep all six buttons on the lower line, clear of native title-bar
+        // Keep all controls on the lower line, clear of native title-bar
         // indicators. A visible scrollbar exposes overflow on narrow phones.
         NSScrollView *controls = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 48)];
         controls.autoresizingMask = NSViewWidthSizable;
@@ -322,7 +407,7 @@ sc_recording_ui_create(struct sc_screen *screen, struct sc_recording *recording,
         controls.verticalScrollElasticity = NSScrollElasticityNone;
         controls.accessibilityLabel = @"Recording and screenshot controls";
         controls.toolTip = @"Scroll horizontally to reach all recording and screenshot buttons";
-        NSView *buttonRow = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, 806, 32)];
+        NSView *buttonRow = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, 1046, 32)];
         controls.documentView = buttonRow;
         ui.recordButton = [NSButton buttonWithTitle:@"● Record" target:ui action:@selector(start:)];
         ui.recordButton.frame = NSMakeRect(12, 4, 90, 28);
@@ -330,16 +415,24 @@ sc_recording_ui_create(struct sc_screen *screen, struct sc_recording *recording,
         ui.stopButton = [NSButton buttonWithTitle:@"■ Stop Recording" target:ui action:@selector(stop:)];
         ui.stopButton.frame = NSMakeRect(108, 4, 142, 28);
         ui.stopButton.accessibilityLabel = @"Stop Recording";
+        ui.androidMicButton = [NSButton checkboxWithTitle:@"Android Mic" target:ui action:@selector(toggleAndroidMic:)];
+        ui.androidMicButton.frame = NSMakeRect(258, 4, 112, 28);
+        ui.androidMicButton.accessibilityLabel = @"Include Android microphone in recording";
+        ui.androidMicButton.state = NSControlStateValueOff;
+        ui.localMicButton = [NSButton checkboxWithTitle:@"Local Mic" target:ui action:@selector(toggleLocalMic:)];
+        ui.localMicButton.frame = NSMakeRect(378, 4, 104, 28);
+        ui.localMicButton.accessibilityLabel = @"Include this Mac's microphone in recording";
+        ui.localMicButton.state = NSControlStateValueOff;
         NSButton *chooseFolder = [NSButton buttonWithTitle:@"Choose Folder" target:ui action:@selector(chooseFolder:)];
-        chooseFolder.frame = NSMakeRect(258, 4, 116, 28);
+        chooseFolder.frame = NSMakeRect(498, 4, 116, 28);
         chooseFolder.toolTip = @"Choose where videos and screenshots are saved";
         ui.openFolderButton = [NSButton buttonWithTitle:@"Open Folder" target:ui action:@selector(openFolder:)];
-        ui.openFolderButton.frame = NSMakeRect(382, 4, 108, 28);
+        ui.openFolderButton.frame = NSMakeRect(622, 4, 108, 28);
         ui.screenshotCopyButton = [NSButton buttonWithTitle:@"Copy Screenshot" target:ui action:@selector(copyScreenshot:)];
-        ui.screenshotCopyButton.frame = NSMakeRect(498, 4, 144, 28);
+        ui.screenshotCopyButton.frame = NSMakeRect(738, 4, 144, 28);
         ui.screenshotCopyButton.toolTip = @"Copy the displayed phone image to the clipboard";
         ui.saveScreenshotButton = [NSButton buttonWithTitle:@"Save Screenshot" target:ui action:@selector(saveScreenshot:)];
-        ui.saveScreenshotButton.frame = NSMakeRect(650, 4, 144, 28);
+        ui.saveScreenshotButton.frame = NSMakeRect(890, 4, 144, 28);
         ui.status = [NSTextField labelWithString:@"Waiting for the video stream…"];
         // Symmetric insets center status text while leaving native controls clear.
         ui.status.frame = NSMakeRect(80, 54, MAX(0, rowWidth - 160), 20);
@@ -349,6 +442,8 @@ sc_recording_ui_create(struct sc_screen *screen, struct sc_recording *recording,
         ui.status.font = [NSFont systemFontOfSize:11];
         [buttonRow addSubview:ui.recordButton];
         [buttonRow addSubview:ui.stopButton];
+        [buttonRow addSubview:ui.androidMicButton];
+        [buttonRow addSubview:ui.localMicButton];
         [buttonRow addSubview:chooseFolder];
         [buttonRow addSubview:ui.openFolderButton];
         [buttonRow addSubview:ui.screenshotCopyButton];

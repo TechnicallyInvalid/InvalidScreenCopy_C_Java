@@ -5,12 +5,61 @@ public final class DeviceMessage {
     public static final int TYPE_CLIPBOARD = 0;
     public static final int TYPE_ACK_CLIPBOARD = 1;
     public static final int TYPE_UHID_OUTPUT = 2;
+    public static final int TYPE_MIC_STATUS = 3;
+    public static final int TYPE_MIC_PCM = 4;
+    public static final int TYPE_AUDIO_CLOCK = 5;
+
+    public static final int MIC_STOPPED = 0;
+    public static final int MIC_READY = 1;
+    public static final int MIC_ERROR = 2;
+    public static final int MIC_MAX_BYTES = 1920;
 
     private int type;
     private String text;
     private long sequence;
     private int id;
     private byte[] data;
+    private int session;
+    private int status;
+    private long pts;
+
+    public static DeviceMessage createMicStatus(int session, int status, String text) {
+        if (status < MIC_STOPPED || status > MIC_ERROR) {
+            throw new IllegalArgumentException("Invalid microphone status");
+        }
+        DeviceMessage event = new DeviceMessage();
+        event.type = TYPE_MIC_STATUS;
+        event.session = session;
+        event.status = status;
+        event.text = text;
+        return event;
+    }
+
+    public static DeviceMessage createMicPcm(int session, long pts, byte[] data) {
+        if (session == 0 || pts < 0 || data == null || data.length == 0
+                || (data.length & 1) != 0 || data.length > MIC_MAX_BYTES) {
+            throw new IllegalArgumentException("Invalid microphone PCM frame");
+        }
+        DeviceMessage event = new DeviceMessage();
+        event.type = TYPE_MIC_PCM;
+        event.session = session;
+        event.pts = pts;
+        event.data = data;
+        return event;
+    }
+
+    public static DeviceMessage createAudioClock(int session, int sequence, long pts) {
+        DeviceMessage event = new DeviceMessage();
+        event.type = TYPE_AUDIO_CLOCK;
+        event.session = session;
+        event.sequence = sequence & 0xffffffffL;
+        event.pts = pts;
+        return event;
+    }
+
+    public int getSession() { return session; }
+    public int getStatus() { return status; }
+    public long getPts() { return pts; }
 
     private DeviceMessage() {
     }

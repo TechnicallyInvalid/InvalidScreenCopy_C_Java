@@ -11,6 +11,7 @@ import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
+import android.media.AudioRecordingConfiguration;
 import android.media.MediaCodec;
 import android.os.Build;
 
@@ -21,8 +22,8 @@ public final class AudioPlaybackCapture implements AudioCapture {
 
     private final boolean keepPlayingOnDevice;
 
-    private AudioRecord recorder;
-    private AudioRecordReader reader;
+    private volatile AudioRecord recorder;
+    private volatile AudioRecordReader reader;
 
     public AudioPlaybackCapture(boolean keepPlayingOnDevice) {
         this.keepPlayingOnDevice = keepPlayingOnDevice;
@@ -147,6 +148,26 @@ public final class AudioPlaybackCapture implements AudioCapture {
             // Will call .stop() if necessary, without throwing an IllegalStateException
             recorder.release();
         }
+    }
+
+    @Override
+    @TargetApi(AndroidVersions.API_29_ANDROID_10)
+    public boolean isCapturingWithoutSilencing() {
+        AudioRecord current = recorder;
+        if (current == null || Build.VERSION.SDK_INT < AndroidVersions.API_29_ANDROID_10) return false;
+        try {
+            AudioRecordingConfiguration configuration = current.getActiveRecordingConfiguration();
+            return current.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING
+                    && configuration != null && !configuration.isClientSilenced();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    @Override
+    public boolean hasReliableTimestamps() {
+        AudioRecordReader current = reader;
+        return current != null && current.hasReliableTimestamps();
     }
 
     @Override

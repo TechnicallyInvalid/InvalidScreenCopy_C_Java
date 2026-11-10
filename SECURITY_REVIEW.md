@@ -98,7 +98,7 @@ from the existing encoder. As of 2026-11-10 it no longer resets capture or
 recreates the encoder. It adds no socket,
 permission, data source, service, or persistence to Android. Desktop Record
 also sends the existing wake-up key action when control is enabled. Client and
-server identify themselves as `5.0.1-invalid.1`, preventing accidental pairing
+server now identify themselves as `5.0.1-invalid.2`, preventing accidental pairing
 with the unmodified upstream 5.0.1 server.
 
 The macOS UI stores only the selected recording-directory path in local
@@ -108,6 +108,39 @@ Failures are reported locally; partial files are retained if any video was
 captured. Recorder changes were checked for stream lifetime, mutex ordering,
 exclusive output ownership, finalization errors, and keyframe/audio boundaries.
 See [verification](VERIFICATION.md) for automated and device test evidence.
+
+## Optional microphone recording — 2026-11-10
+
+The two independent microphone selections default off for each display session.
+Neither selecting Android Mic nor configuring the backend opens a microphone.
+Only explicit Local Mic activation requests macOS permission; starting a selected
+recording rechecks authorization without prompting. Denied/restricted permission
+leaves the source off. No OS permission or global library setting is changed.
+
+Android mic PCM travels only through the existing authorized ADB control channel
+to the recording mixer on this Mac. It does not replace device-output capture
+and is never routed to the live player. Local mic PCM likewise goes only to the
+recording mixer. New messages have fixed bounds, validated sizes and per-clip
+session IDs; all queues are bounded. Stale messages cannot affect another clip.
+
+The Android worker opens AudioRecord only after the explicit recording request,
+checks mute/silencing/output availability and timestamp reliability, and releases
+capture before terminal status. It requires Android 12+, does not launch an
+activity workaround or alter Android settings, and expires a session after five
+seconds without its heartbeat. The client waits for release acknowledgement;
+failed or unconfirmed stops close the control connection. Normal shutdown keeps
+that connection available briefly for capture release before stopping transport.
+Local capture closes and joins its callbacks before finalization. This targeted
+lifecycle review and synthetic tests do not establish physical device behavior.
+
+Native AAC encoding was enabled in the existing private, pinned FFmpeg source
+build. No new external runtime dependency was downloaded. Microphone bytes,
+recordings, permission state and clock diagnostics are not uploaded. The bundled
+test video is an explicitly generated test pattern/tone, not user content.
+
+See [AUDIO_RECORDING.md](AUDIO_RECORDING.md) for timing assumptions, supported
+modes and limitations. Real microphones, permission dialogs and connected phones
+were not exercised. This is not a guarantee of absence of implementation bugs.
 
 The native macOS device picker runs the existing ADB executable with
 `devices -l`, and starts the bundled display with the selected serial as a

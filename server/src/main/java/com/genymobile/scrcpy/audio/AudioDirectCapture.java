@@ -11,6 +11,7 @@ import android.annotation.TargetApi;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.media.AudioRecord;
+import android.media.AudioRecordingConfiguration;
 import android.media.MediaCodec;
 import android.os.Build;
 import android.os.SystemClock;
@@ -27,8 +28,8 @@ public class AudioDirectCapture implements AudioCapture {
 
     private final int audioSource;
 
-    private AudioRecord recorder;
-    private AudioRecordReader reader;
+    private volatile AudioRecord recorder;
+    private volatile AudioRecordReader reader;
 
     public AudioDirectCapture(AudioSource audioSource) {
         this.audioSource = audioSource.getDirectAudioSource();
@@ -132,6 +133,26 @@ public class AudioDirectCapture implements AudioCapture {
             // Will call .stop() if necessary, without throwing an IllegalStateException
             recorder.release();
         }
+    }
+
+    @Override
+    @TargetApi(AndroidVersions.API_29_ANDROID_10)
+    public boolean isCapturingWithoutSilencing() {
+        AudioRecord current = recorder;
+        if (current == null || Build.VERSION.SDK_INT < AndroidVersions.API_29_ANDROID_10) return false;
+        try {
+            AudioRecordingConfiguration configuration = current.getActiveRecordingConfiguration();
+            return current.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING
+                    && configuration != null && !configuration.isClientSilenced();
+        } catch (RuntimeException e) {
+            return false; // Released, permission revoked, or unsupported vendor implementation.
+        }
+    }
+
+    @Override
+    public boolean hasReliableTimestamps() {
+        AudioRecordReader current = reader;
+        return current != null && current.hasReliableTimestamps();
     }
 
     @Override

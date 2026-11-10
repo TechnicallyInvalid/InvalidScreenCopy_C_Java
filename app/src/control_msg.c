@@ -194,6 +194,14 @@ sc_control_msg_serialize(const struct sc_control_msg *msg, uint8_t *buf) {
                                       SC_CONTROL_MSG_SCAN_FILE_PATH_MAX_LENGTH);
             return 1 + len;
         };
+        case SC_CONTROL_MSG_TYPE_SET_ANDROID_MIC:
+            buf[1] = msg->set_android_mic.enabled ? 1 : 0;
+            sc_write32be(&buf[2], msg->set_android_mic.session);
+            return 6;
+        case SC_CONTROL_MSG_TYPE_CLOCK_QUERY:
+            sc_write32be(&buf[1], msg->clock_query.session);
+            sc_write32be(&buf[5], msg->clock_query.sequence);
+            return 9;
         case SC_CONTROL_MSG_TYPE_EXPAND_NOTIFICATION_PANEL:
         case SC_CONTROL_MSG_TYPE_EXPAND_SETTINGS_PANEL:
         case SC_CONTROL_MSG_TYPE_COLLAPSE_PANELS:
@@ -340,6 +348,15 @@ sc_control_msg_log(const struct sc_control_msg *msg) {
         case SC_CONTROL_MSG_TYPE_REQUEST_KEYFRAME:
             LOG_CMSG("request keyframe");
             break;
+        case SC_CONTROL_MSG_TYPE_SET_ANDROID_MIC:
+            LOG_CMSG("Android microphone %s, session=%" PRIu32,
+                     msg->set_android_mic.enabled ? "on" : "off",
+                     msg->set_android_mic.session);
+            break;
+        case SC_CONTROL_MSG_TYPE_CLOCK_QUERY:
+            LOG_CMSG("clock query session=%" PRIu32 " sequence=%" PRIu32,
+                     msg->clock_query.session, msg->clock_query.sequence);
+            break;
         case SC_CONTROL_MSG_TYPE_CAMERA_SET_TORCH:
             LOG_CMSG("camera set torch %s",
                      msg->camera_set_torch.on ? "on" : "off");
@@ -366,7 +383,10 @@ sc_control_msg_is_droppable(const struct sc_control_msg *msg) {
     // Cannot drop UHID_DESTROY messages either, because a further UHID_CREATE
     // with the same id may fail.
     return msg->type != SC_CONTROL_MSG_TYPE_UHID_CREATE
-        && msg->type != SC_CONTROL_MSG_TYPE_UHID_DESTROY;
+        && msg->type != SC_CONTROL_MSG_TYPE_UHID_DESTROY
+        // A stop must not be discarded while the phone microphone is open.
+        && !(msg->type == SC_CONTROL_MSG_TYPE_SET_ANDROID_MIC
+             && !msg->set_android_mic.enabled);
 }
 
 void

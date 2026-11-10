@@ -332,7 +332,7 @@ static NSMutableDictionary *ISCEnvironment(void) {
     NSTask *task = [NSTask new];
     task.executableURL = [NSURL fileURLWithPath:ISCMirrorPath()];
     // Device identifiers remain individual arguments, never shell commands.
-    task.arguments = @[@"--serial", device.serial, @"--stay-awake",
+    task.arguments = @[@"--serial", device.serial, @"--stay-awake", @"--audio-source=output",
         @"--window-title", [@"InvalidScreenCopy — " stringByAppendingString:device.name]];
     NSMutableDictionary *environment = ISCEnvironment();
     environment[@"ISC_LAUNCHER_PIPE"] = @"1";

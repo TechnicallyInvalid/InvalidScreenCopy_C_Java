@@ -29,6 +29,8 @@ sc_receiver_init(struct sc_receiver *receiver, sc_socket control_socket,
     receiver->control_socket = control_socket;
     receiver->acksync = NULL;
     receiver->uhid_devices = NULL;
+    receiver->microphone_cbs = NULL;
+    receiver->microphone_userdata = NULL;
 
     assert(cbs && cbs->on_ended);
     receiver->cbs = cbs;
@@ -40,6 +42,13 @@ sc_receiver_init(struct sc_receiver *receiver, sc_socket control_socket,
 void
 sc_receiver_destroy(struct sc_receiver *receiver) {
     sc_mutex_destroy(&receiver->mutex);
+}
+
+void
+sc_receiver_set_microphone_callbacks(struct sc_receiver *receiver,
+    const struct sc_receiver_microphone_callbacks *callbacks, void *userdata) {
+    receiver->microphone_cbs = callbacks;
+    receiver->microphone_userdata = userdata;
 }
 
 static void
@@ -80,6 +89,7 @@ task_uhid_output(void *userdata) {
 
 static void
 process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
+    const struct sc_receiver_microphone_callbacks *mic = receiver->microphone_cbs;
     switch (msg->type) {
         case DEVICE_MSG_TYPE_CLIPBOARD: {
             // Take ownership of the text (do not destroy the msg)
@@ -110,6 +120,25 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
 
             sc_acksync_ack(receiver->acksync, msg->ack_clipboard.sequence);
             // No allocation to free in the msg
+            break;
+        case DEVICE_MSG_TYPE_MIC_STATUS:
+            if (mic && mic->on_status) {
+                mic->on_status(msg->mic_status.session, msg->mic_status.status,
+                                msg->mic_status.text, receiver->microphone_userdata);
+            }
+            break;
+        case DEVICE_MSG_TYPE_MIC_PCM:
+            if (mic && mic->on_pcm) {
+                mic->on_pcm(msg->mic_pcm.session, msg->mic_pcm.pts,
+                             msg->mic_pcm.data, msg->mic_pcm.size,
+                             receiver->microphone_userdata);
+            }
+            break;
+        case DEVICE_MSG_TYPE_CLOCK:
+            if (mic && mic->on_clock) {
+                mic->on_clock(msg->clock.session, msg->clock.sequence,
+                               msg->clock.device_us, receiver->microphone_userdata);
+            }
             break;
         case DEVICE_MSG_TYPE_UHID_OUTPUT:
             if (sc_get_log_level() <= SC_LOG_LEVEL_VERBOSE) {
@@ -215,6 +244,9 @@ run_receiver(void *data) {
         }
     }
 
+    if (receiver->microphone_cbs && receiver->microphone_cbs->on_closed) {
+        receiver->microphone_cbs->on_closed(error, receiver->microphone_userdata);
+    }
     receiver->cbs->on_ended(receiver, error, receiver->cbs_userdata);
 
     return 0;

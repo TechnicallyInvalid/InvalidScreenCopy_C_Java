@@ -31,6 +31,8 @@ public final class ControlMessage {
     public static final int TYPE_RESIZE_DISPLAY = 21;
     public static final int TYPE_SCAN_FILE = 22;
     public static final int TYPE_REQUEST_KEYFRAME = 23;
+    public static final int TYPE_SET_ANDROID_MIC = 24;
+    public static final int TYPE_AUDIO_CLOCK_SYNC = 25;
 
     public static final long SEQUENCE_INVALID = 0;
 
@@ -61,6 +63,27 @@ public final class ControlMessage {
     private int productId;
     private int width;
     private int height;
+    private int session;
+
+    public static ControlMessage createSetAndroidMic(boolean on, int session) {
+        ControlMessage msg = new ControlMessage();
+        msg.type = TYPE_SET_ANDROID_MIC;
+        msg.on = on;
+        msg.session = session;
+        return msg;
+    }
+
+    public static ControlMessage createAudioClockSync(int session, int sequence) {
+        ControlMessage msg = new ControlMessage();
+        msg.type = TYPE_AUDIO_CLOCK_SYNC;
+        msg.session = session;
+        msg.sequence = sequence & 0xffffffffL;
+        return msg;
+    }
+
+    public int getSession() {
+        return session;
+    }
 
     private ControlMessage() {
     }

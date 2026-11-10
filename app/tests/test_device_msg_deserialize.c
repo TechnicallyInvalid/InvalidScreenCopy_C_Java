@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "device_msg.h"
+#include "util/binary.h"
 
 static void test_deserialize_clipboard(void) {
     const uint8_t input[] = {
@@ -83,6 +84,113 @@ static void test_deserialize_uhid_output(void) {
     sc_device_msg_destroy(&msg);
 }
 
+static void assert_fragmented(const uint8_t *input, size_t size) {
+    struct sc_device_msg msg;
+    for (size_t len = 0; len < size; ++len) {
+        assert(!sc_device_msg_deserialize(input, len, &msg));
+    }
+}
+
+static void test_microphone_status(void) {
+    const uint8_t input[] = {
+        3, 0x89, 0xab, 0xcd, 0xef, 2, 0, 7,
+        'D', 'e', 'n', 'i', 'e', 'd', '!',
+    };
+    assert_fragmented(input, sizeof(input));
+    struct sc_device_msg msg;
+    assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == sizeof(input));
+    assert(msg.type == DEVICE_MSG_TYPE_MIC_STATUS);
+    assert(msg.mic_status.session == UINT32_C(0x89abcdef));
+    assert(msg.mic_status.status == SC_MIC_STATUS_ERROR);
+    assert(!strcmp(msg.mic_status.text, "Denied!"));
+    sc_device_msg_destroy(&msg); // inline text requires no free
+
+    uint8_t maximum[8 + SC_MIC_STATUS_TEXT_MAX_LENGTH];
+    memcpy(maximum, input, 8);
+    sc_write16be(&maximum[6], SC_MIC_STATUS_TEXT_MAX_LENGTH);
+    memset(maximum + 8, 'a', SC_MIC_STATUS_TEXT_MAX_LENGTH);
+    assert_fragmented(maximum, sizeof(maximum));
+    assert(sc_device_msg_deserialize(maximum, sizeof(maximum), &msg) == sizeof(maximum));
+    assert(strlen(msg.mic_status.text) == SC_MIC_STATUS_TEXT_MAX_LENGTH);
+    maximum[5] = 3; // invalid status fails immediately with complete header
+    assert(sc_device_msg_deserialize(maximum, 8, &msg) == -1);
+    maximum[5] = 0;
+    sc_write16be(&maximum[6], SC_MIC_STATUS_TEXT_MAX_LENGTH + 1);
+    assert(sc_device_msg_deserialize(maximum, 8, &msg) == -1);
+    sc_write16be(&maximum[6], 0);
+    assert(sc_device_msg_deserialize(maximum, 8, &msg) == 8);
+    assert(!msg.mic_status.text[0]);
+
+    // UTF-8 status text accepts complete multibyte code points, never a
+    // truncated sequence or an embedded NUL that hides diagnostic details.
+    const uint8_t valid[] = {0xc3, 0xa9, 0xe2, 0x9c, 0x93, 0xf0, 0x9f, 0x8e, 0xa4};
+    sc_write16be(&maximum[6], sizeof(valid));
+    memcpy(maximum + 8, valid, sizeof(valid));
+    assert(sc_device_msg_deserialize(maximum, 8 + sizeof(valid), &msg) == 8 + sizeof(valid));
+    sc_write16be(&maximum[6], 1);
+    for (unsigned value = 0; value < 256; ++value) {
+        maximum[8] = value;
+        ssize_t result = sc_device_msg_deserialize(maximum, 9, &msg);
+        assert(result == (value > 0 && value < 128 ? 9 : -1));
+    }
+    const uint8_t invalid[][4] = {
+        {0xc0, 0x80, 'a', 'a'}, // overlong
+        {0xed, 0xa0, 0x80, 'a'}, // surrogate
+        {0xf4, 0x90, 0x80, 0x80}, // above U+10FFFF
+        {0xe2, 'a', 0x80, 'a'}, // non-continuation
+    };
+    sc_write16be(&maximum[6], 4);
+    for (size_t i = 0; i < ARRAY_LEN(invalid); ++i) {
+        memcpy(maximum + 8, invalid[i], 4);
+        assert(sc_device_msg_deserialize(maximum, 12, &msg) == -1);
+    }
+}
+
+static void test_microphone_pcm_and_clock(void) {
+    uint8_t input[15 + SC_MIC_PCM_MAX_SIZE + 17] = {4, 0x89, 0xab, 0xcd, 0xef};
+    const int64_t pts = INT64_C(0x0102030405060708);
+    sc_write64be(&input[5], pts);
+    sc_write16be(&input[13], SC_MIC_PCM_MAX_SIZE);
+    for (size_t i = 0; i < SC_MIC_PCM_MAX_SIZE; ++i) input[15 + i] = i;
+    size_t pcm_size = 15 + SC_MIC_PCM_MAX_SIZE;
+    assert_fragmented(input, pcm_size);
+    struct sc_device_msg msg;
+    assert(sc_device_msg_deserialize(input, pcm_size, &msg) == (ssize_t) pcm_size);
+    assert(msg.type == DEVICE_MSG_TYPE_MIC_PCM);
+    assert(msg.mic_pcm.session == UINT32_C(0x89abcdef));
+    assert(msg.mic_pcm.pts == pts);
+    assert(msg.mic_pcm.size == SC_MIC_PCM_MAX_SIZE);
+    assert(!memcmp(msg.mic_pcm.data, input + 15, SC_MIC_PCM_MAX_SIZE));
+    sc_device_msg_destroy(&msg);
+
+    uint8_t *clock = input + pcm_size;
+    clock[0] = 5;
+    sc_write32be(clock + 1, UINT32_C(0x89abcdef));
+    sc_write32be(clock + 5, UINT32_C(0xfefdfcfb));
+    sc_write64be(clock + 9, pts + 20000);
+    assert_fragmented(clock, 17);
+    // Coalesced TCP messages consume exactly one frame at a time.
+    assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == (ssize_t) pcm_size);
+    assert(sc_device_msg_deserialize(clock, 17, &msg) == 17);
+    assert(msg.type == DEVICE_MSG_TYPE_CLOCK);
+    assert(msg.clock.session == UINT32_C(0x89abcdef));
+    assert(msg.clock.sequence == UINT32_C(0xfefdfcfb));
+    assert(msg.clock.device_us == pts + 20000);
+    sc_device_msg_destroy(&msg);
+    clock[9] = 0x80;
+    assert(sc_device_msg_deserialize(clock, 17, &msg) == -1);
+
+    const uint16_t invalid_sizes[] = {0, 1, 1919, 1921, 1922, UINT16_MAX};
+    for (size_t i = 0; i < ARRAY_LEN(invalid_sizes); ++i) {
+        sc_write16be(input + 13, invalid_sizes[i]);
+        assert(sc_device_msg_deserialize(input, 15, &msg) == -1);
+    }
+    sc_write16be(input + 13, 2);
+    assert(sc_device_msg_deserialize(input, 17, &msg) == 17);
+    input[5] = 0x80;
+    assert(sc_device_msg_deserialize(input, 15, &msg) == -1);
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -91,5 +199,7 @@ int main(int argc, char *argv[]) {
     test_deserialize_clipboard_big();
     test_deserialize_ack_set_clipboard();
     test_deserialize_uhid_output();
+    test_microphone_status();
+    test_microphone_pcm_and_clock();
     return 0;
 }

@@ -25,6 +25,22 @@ public class ControlMessageReader {
     public ControlMessage read() throws IOException {
         int type = dis.readUnsignedByte();
         switch (type) {
+            case ControlMessage.TYPE_SET_ANDROID_MIC: {
+                int enabled = dis.readUnsignedByte();
+                int session = dis.readInt();
+                if (enabled > 1 || (enabled == 1 && session == 0)) {
+                    throw new ControlProtocolException("Invalid microphone command");
+                }
+                return ControlMessage.createSetAndroidMic(enabled != 0, session);
+            }
+            case ControlMessage.TYPE_AUDIO_CLOCK_SYNC: {
+                int session = dis.readInt();
+                int sequence = dis.readInt();
+                if (session == 0) {
+                    throw new ControlProtocolException("Invalid clock session");
+                }
+                return ControlMessage.createAudioClockSync(session, sequence);
+            }
             case ControlMessage.TYPE_INJECT_KEYCODE:
                 return parseInjectKeycode();
             case ControlMessage.TYPE_INJECT_TEXT:

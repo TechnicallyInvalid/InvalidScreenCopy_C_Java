@@ -26,6 +26,7 @@
 #include "recorder.h"
 #ifdef __APPLE__
 #include "recording_ui.h"
+#include "recording_microphones.h"
 #endif
 #include "screen.h"
 #include "sdl_hints.h"
@@ -404,6 +405,7 @@ scrcpy(struct scrcpy_options *options) {
 #ifdef __APPLE__
     bool recording_initialized = false;
     void *recording_ui = NULL;
+    struct sc_recording_microphones *microphones = NULL;
 #endif
     bool recorder_started = false;
 #ifdef HAVE_V4L2
@@ -547,7 +549,14 @@ scrcpy(struct scrcpy_options *options) {
         }
     }
 
-    if (options->audio_playback) {
+    bool needs_sdl_audio = options->audio_playback;
+#ifdef __APPLE__
+    // SDL audio initialization belongs on the main thread. It opens no input
+    // device; Local Mic opens one only after explicit selection and Record.
+    needs_sdl_audio |= options->window && options->video && options->audio
+        && !options->record_filename;
+#endif
+    if (needs_sdl_audio) {
         if (!SDL_Init(SDL_INIT_AUDIO)) {
             LOGE("Could not initialize SDL audio: %s", SDL_GetError());
             goto end;
@@ -661,6 +670,12 @@ scrcpy(struct scrcpy_options *options) {
             goto end;
         }
         recording_initialized = true;
+        bool device_output = options->audio
+            && ((options->audio_source == SC_AUDIO_SOURCE_AUTO
+                    && options->video_source == SC_VIDEO_SOURCE_DISPLAY)
+                || options->audio_source == SC_AUDIO_SOURCE_OUTPUT
+                || options->audio_source == SC_AUDIO_SOURCE_PLAYBACK);
+        sc_recording_set_microphone_backend(&s->recording, NULL, NULL, device_output);
         sc_packet_source_add_sink(&s->video_demuxer.packet_source,
                                    &s->recording.video.sink);
         if (options->audio) {
@@ -825,6 +840,19 @@ aoa_complete:
 
         sc_controller_configure(&s->controller, acksync, uhid_devices);
 
+#ifdef __APPLE__
+        if (recording_initialized) {
+            bool device_output = options->audio
+                && ((options->audio_source == SC_AUDIO_SOURCE_AUTO
+                        && options->video_source == SC_VIDEO_SOURCE_DISPLAY)
+                    || options->audio_source == SC_AUDIO_SOURCE_OUTPUT
+                    || options->audio_source == SC_AUDIO_SOURCE_PLAYBACK);
+            microphones = sc_recording_microphones_create(&s->recording,
+                &s->controller, device_output);
+            if (!microphones) goto end;
+        }
+#endif
+
         if (!sc_controller_start(&s->controller)) {
             goto end;
         }
@@ -879,6 +907,11 @@ aoa_complete:
 
     bool needs_video_decoder = options->video_playback;
     bool needs_audio_decoder = options->audio_playback;
+#ifdef __APPLE__
+    // Raw AAC still goes directly to recordings with neither mic selected.
+    // Mixed recordings use a second frame sink, never the speaker/player sink.
+    needs_audio_decoder |= recording_initialized && options->audio;
+#endif
 #ifdef HAVE_V4L2
     needs_video_decoder |= !!options->v4l2_device;
 #endif
@@ -958,6 +991,13 @@ aoa_complete:
         sc_frame_source_add_sink(&s->audio_decoder.frame_source,
                                  &s->audio_player.frame_sink);
     }
+
+#ifdef __APPLE__
+    if (recording_initialized && options->audio) {
+        sc_frame_source_add_sink(&s->audio_decoder.frame_source,
+                                 &s->recording.audio_frame_sink);
+    }
+#endif
 
 #ifdef HAVE_V4L2
     if (options->v4l2_device) {
@@ -1081,6 +1121,14 @@ end:
         // Request finalization without blocking the UI before the display and
         // streams are stopped. recording_destroy() drains the writer below.
         sc_recording_request_stop(&s->recording);
+        // Keep the control channel alive briefly for the phone's mic-release
+        // acknowledgement. Hide the display before waiting; this never waits
+        // for recording file I/O or encoder/writer finalization.
+        if (screen_initialized) sc_screen_hide_window(&s->screen);
+        if (!sc_recording_wait_microphones_stopped(&s->recording,
+                sc_tick_now() + SC_TICK_FROM_SEC(3))) {
+            LOGW("Microphone cleanup is still pending; closing device transport");
+        }
     }
 #endif
     if (timeout_started) {
@@ -1223,9 +1271,6 @@ end:
     if (controller_started) {
         sc_controller_join(&s->controller);
     }
-    if (controller_initialized) {
-        sc_controller_destroy(&s->controller);
-    }
 
     if (recorder_started) {
         sc_recorder_join(&s->recorder);
@@ -1234,7 +1279,13 @@ end:
     if (recording_initialized) {
         sc_recording_destroy(&s->recording);
     }
+    sc_recording_microphones_destroy(microphones);
 #endif
+    // The recording worker may send a final mic stop even after the receiver
+    // exits. Keep the controller mutex alive until that worker has finished.
+    if (controller_initialized) {
+        sc_controller_destroy(&s->controller);
+    }
     if (recorder_initialized) {
         sc_recorder_destroy(&s->recorder);
     }

@@ -152,8 +152,10 @@ dependencies = [
 
 if host_machine.system() == 'darwin'
     add_languages('objc')
-    src += ['src/recording.c', 'src/recording_file.c', 'src/recording_ui.m', 'src/screenshot.m']
-    dependencies += dependency('appleframeworks', modules: ['Cocoa'])
+    src += ['src/recording.c', 'src/recording_file.c', 'src/recording_ui.m',
+            'src/screenshot.m', 'src/local_microphone.m', 'src/recording_audio.c',
+            'src/recording_clock.c', 'src/recording_microphones.c']
+    dependencies += dependency('appleframeworks', modules: ['Cocoa', 'AVFoundation'])
     add_project_arguments('-fobjc-arc', language: 'objc')
     executable('InvalidScreenCopyLauncher', [
         'src/device_launcher.m', 'src/device_picker.m',
@@ -352,6 +354,21 @@ if get_option('buildtype') == 'debug'
             'tests/test_screenshot.m', 'src/screenshot.m', 'src/recording_file.c',
         ], include_directories: src_dir, dependencies: dependencies)
         test('test_screenshot', screenshot_test)
+        local_microphone_test = executable('test_local_microphone', [
+            'tests/test_local_microphone.m',
+        ], include_directories: src_dir, dependencies: dependencies)
+        test('test_local_microphone', local_microphone_test)
+        tests += [['test_recording_clock', [
+            'tests/test_recording_clock.c', 'src/recording_clock.c',
+        ]]]
+        tests += [['test_recording_audio', [
+            'tests/test_recording_audio.c', 'src/recording_audio.c',
+            'src/util/thread.c', 'src/util/tick.c', 'src/util/log.c',
+        ]]]
+        tests += [['test_recording_microphones_backend', [
+            'tests/test_recording_microphones_backend.c', 'src/recording_clock.c',
+            'src/util/thread.c', 'src/util/tick.c', 'src/util/log.c',
+        ]]]
         tests += [['test_recording_file', [
             'tests/test_recording_file.c', 'src/recording_file.c',
         ]]]
@@ -362,19 +379,28 @@ if get_option('buildtype') == 'debug'
         ]]]
         executable('test_recording', [
             'tests/test_recording.c', 'src/recording.c', 'src/recording_file.c',
-            'src/recorder.c', 'src/options.c', 'src/compat.c',
+            'src/recorder.c', 'src/recording_audio.c', 'src/options.c', 'src/compat.c',
             'src/util/thread.c', 'src/util/log.c', 'src/util/str.c',
             'src/util/strbuf.c', 'src/util/memory.c', 'src/util/tick.c',
         ], include_directories: src_dir, dependencies: dependencies,
            c_args: ['-DSC_TEST'])
         recording_async_test = executable('test_recording_async', [
             'tests/test_recording_async.c', 'src/recording_file.c',
-            'src/recorder.c', 'src/options.c', 'src/compat.c',
+            'src/recorder.c', 'src/recording_audio.c', 'src/options.c', 'src/compat.c',
             'src/util/thread.c', 'src/util/log.c', 'src/util/str.c',
             'src/util/strbuf.c', 'src/util/memory.c', 'src/util/tick.c',
         ], include_directories: src_dir, dependencies: dependencies,
            c_args: ['-DSC_TEST'])
         test('test_recording_async', recording_async_test, timeout: 20)
+        recording_microphones_test = executable('test_recording_microphones', [
+            'tests/test_recording_microphones.c', 'src/recording.c',
+            'src/recording_file.c', 'src/recording_audio.c', 'src/recorder.c',
+            'src/options.c', 'src/compat.c', 'src/util/thread.c',
+            'src/util/log.c', 'src/util/str.c', 'src/util/strbuf.c',
+            'src/util/memory.c', 'src/util/tick.c',
+        ], include_directories: src_dir, dependencies: dependencies,
+           c_args: ['-DSC_TEST'])
+        test('test_recording_microphones', recording_microphones_test, timeout: 30)
     endif
 
     foreach t : tests

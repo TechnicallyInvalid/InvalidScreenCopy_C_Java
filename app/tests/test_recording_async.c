@@ -172,6 +172,7 @@ main(void) {
     assert(!sc_recording_request_start(&r, directory, 1794100000124));
     sc_recording_request_stop(&r);
     assert_responsive(&r, false);
+    assert(sc_recording_wait_microphones_stopped(&r, sc_tick_now()));
     release_gate(&gate.release_open);
     sc_recording_stop(&r);
     assert(gate.timestamp == 1794100000123);
@@ -209,6 +210,7 @@ main(void) {
     sc_recording_request_stop(&r);
     wait_gate(&gate.close_entered);
     assert_responsive(&r, false);
+    assert(sc_recording_wait_microphones_stopped(&r, sc_tick_now()));
     assert(!sc_recording_request_start(&r, directory, 1794100001000));
     release_gate(&gate.release_close);
     sc_recording_stop(&r);

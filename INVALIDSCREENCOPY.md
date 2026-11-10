@@ -20,7 +20,10 @@ export PATH="$PWD/.build-tools/bin:$PATH"
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 scripts/build-invalidscreencopy.sh
 python3 scripts/test-capture-control.py
+python3 scripts/test-microphone-protocol.py
+python3 scripts/test-android-mic.py
 scripts/test-recording.sh
+scripts/test-microphone-recording.sh
 scripts/package-macos.sh
 ```
 
@@ -29,9 +32,9 @@ and the installed AIDL, javac and D8 tools. Meson's `prebuilt_server` argument
 points to **that locally generated output**, not a downloaded upstream server.
 All original Apache-2.0 notices are retained.
 
-`test-recording.sh` normally generates its synthetic H.264/AAC fixture using
-an external compatible FFmpeg with libx264. To reuse a previously generated
-fixture with the private decoder/probe tools instead:
+The recording test scripts use the checked-in generated H.264/AAC fixture and
+private FFmpeg tools by default. No user recordings are test inputs. To supply
+another compatible synthetic fixture or explicit tools:
 
 ```sh
 FFMPEG="$PWD/build-deps/prefix/bin/ffmpeg" \
@@ -68,6 +71,14 @@ fix has not been established. No display stress tests are part of this repair.
 
 ## Record clips
 
+Android device output stays included. The independent **Android Mic** and
+**Local Mic** toggles add either microphone or both; both default off. Select
+them before Record. Microphones capture only for that recording and are never
+played through the live speakers. Local Mic permission is requested only when
+you explicitly enable its checkbox. See [audio recording](AUDIO_RECORDING.md)
+for the four combinations, platform requirements, errors and synchronization
+limits.
+
 - Click **Record** or choose **Recording → Start Recording** (Command-R).
 - Click **Stop Recording** or press Command-Shift-R. Wait for **Saved** before
   moving a clip. Closing the app also finalizes an active recording.
@@ -76,7 +87,7 @@ fix has not been established. No display stress tests are part of this repair.
   Cancel leaves the previous choice untouched. A folder change affects the
   next clip; an active clip stays in its original file.
 - Click **Open Folder** or choose **Recording → Open Current Folder** to open
-  the selected recording directory in Finder. All six buttons share the second
+  the selected recording directory in Finder. Capture controls and microphone toggles share the second
   header row, with status centered above them and clear of macOS title-bar indicators.
   A narrow window scrolls this row horizontally instead of forcing the window
   to expand beyond its display-fitted size.
@@ -97,7 +108,9 @@ the encoder produces another frame. The mirror
 window, audio stream, and ADB connection stay open. Each clip starts at the
 first decodable keyframe after the request; there may be a brief capture delay.
 Pre-boundary audio is discarded and timestamps are rebased per clip. Default
-audio is device-output AAC for MP4 compatibility; no microphone is enabled.
+audio is device-output AAC for MP4 compatibility; microphones remain off unless
+explicitly selected. Mic-enabled clips mix and re-encode audio; device-only clips
+retain the encoded audio packets.
 
 An empty clip with no keyframe is removed after cancellation or a ten-second
 timeout. A write failure keeps any partial file and reports failure; mirroring

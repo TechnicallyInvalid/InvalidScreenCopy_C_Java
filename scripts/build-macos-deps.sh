@@ -73,7 +73,7 @@ mkdir -p "$deps/ffmpeg-build"
         --enable-avcodec --enable-avformat --enable-avutil --enable-swresample \
         --enable-ffmpeg --enable-ffprobe --enable-avfilter --enable-swscale \
         --enable-filter=aresample,format,aformat,null,anull,scale \
-        --enable-encoder=wrapped_avframe,pcm_s16le \
+        --enable-encoder=wrapped_avframe,pcm_s16le,aac \
         --enable-libdav1d --enable-decoder=h264,hevc,libdav1d,vp8,vp9,aac,opus,flac,pcm_s16le \
         --enable-parser=h264,hevc,av1,vp8,vp9,aac,opus,flac \
         --enable-muxer=mp4,matroska,webm,opus,adts,flac,wav,null \

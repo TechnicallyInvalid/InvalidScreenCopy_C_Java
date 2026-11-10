@@ -1,5 +1,8 @@
 package com.genymobile.scrcpy.control;
 
+import com.genymobile.scrcpy.audio.AndroidMicCapture;
+import com.genymobile.scrcpy.audio.AudioCapture;
+
 import com.genymobile.scrcpy.AndroidVersions;
 import com.genymobile.scrcpy.AsyncProcessor;
 import com.genymobile.scrcpy.CleanUp;
@@ -91,6 +94,7 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
     private final ControlChannel controlChannel;
     private final CleanUp cleanUp;
     private final DeviceMessageSender sender;
+    private final AndroidMicCapture microphone;
     private final boolean clipboardAutosync;
     private final boolean powerOn;
     private final boolean keepActive;
@@ -116,12 +120,13 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         this.camera = options.getVideoSource() == VideoSource.CAMERA;
         this.controlChannel = controlChannel;
         this.cleanUp = cleanUp;
+        this.sender = new DeviceMessageSender(controlChannel);
+        this.microphone = new AndroidMicCapture(sender);
 
         if (this.camera) {
             // Unused for camera
             this.displayId = Device.DISPLAY_ID_NONE;
             this.supportsInputEvents = false;
-            this.sender = null;
             this.clipboardAutosync = false;
             this.powerOn = false;
             this.keepActive = false;
@@ -134,7 +139,6 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         this.powerOn = options.getPowerOn();
         this.keepActive = options.getKeepActive();
         initPointers();
-        sender = new DeviceMessageSender(controlChannel);
 
         supportsInputEvents = Device.supportsInputEvents(displayId);
         if (!supportsInputEvents) {
@@ -282,6 +286,7 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
             } catch (IOException e) {
                 Ln.e("Controller error", e);
             } finally {
+                microphone.stop();
                 Ln.d("Controller stopped");
                 if (uhidManager != null) {
                     uhidManager.closeAll();
@@ -293,10 +298,12 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         if (sender != null) {
             sender.start();
         }
+        microphone.start();
     }
 
     @Override
     public void stop() {
+        microphone.stop();
         if (keepActiveThread != null) {
             keepActiveThread.interrupt();
         }
@@ -316,6 +323,11 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         if (sender != null) {
             sender.join();
         }
+        microphone.join();
+    }
+
+    public void setAudioCapture(AudioCapture capture) {
+        microphone.setAudioCapture(capture);
     }
 
     private boolean handleEvent() throws IOException {
@@ -334,6 +346,13 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
 
         // Events for all sources (display or camera)
         switch (type) {
+            case ControlMessage.TYPE_SET_ANDROID_MIC:
+                microphone.request(msg.getOn(), msg.getSession());
+                return true;
+            case ControlMessage.TYPE_AUDIO_CLOCK_SYNC:
+                microphone.heartbeat(msg.getSession());
+                sender.send(DeviceMessage.createAudioClock(msg.getSession(), (int) msg.getSequence(), System.nanoTime() / 1000));
+                return true;
             case ControlMessage.TYPE_REQUEST_KEYFRAME:
                 if (surfaceCapture != null && surfaceCapture.getCaptureControl() != null) {
                     surfaceCapture.getCaptureControl().requestKeyFrame();

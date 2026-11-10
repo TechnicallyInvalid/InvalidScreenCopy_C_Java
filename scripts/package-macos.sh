@@ -32,7 +32,8 @@ cat > "$display/Contents/Info.plist" <<'EOF'
 <key>CFBundleExecutable</key><string>InvalidScreenCopy</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>5.0.1</string>
-<key>CFBundleVersion</key><string>3</string>
+<key>CFBundleVersion</key><string>4</string>
+<key>NSMicrophoneUsageDescription</key><string>Record your Mac microphone only when Local Mic is enabled for a recording.</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 EOF
@@ -46,7 +47,8 @@ cat > "$bundle/Contents/Info.plist" <<'EOF'
 <key>CFBundleExecutable</key><string>InvalidScreenCopyLauncher</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>5.0.1</string>
-<key>CFBundleVersion</key><string>3</string>
+<key>CFBundleVersion</key><string>4</string>
+<key>NSMicrophoneUsageDescription</key><string>Record your Mac microphone only when Local Mic is enabled for a recording.</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

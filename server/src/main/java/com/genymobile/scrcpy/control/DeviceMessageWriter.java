@@ -12,6 +12,7 @@ public class DeviceMessageWriter {
 
     private static final int MESSAGE_MAX_SIZE = 1 << 18; // 256k
     public static final int CLIPBOARD_TEXT_MAX_LENGTH = MESSAGE_MAX_SIZE - 5; // type: 1 byte; length: 4 bytes
+    public static final int MIC_STATUS_TEXT_MAX_LENGTH = 512;
 
     private final DataOutputStream dos;
 
@@ -23,6 +24,26 @@ public class DeviceMessageWriter {
         int type = msg.getType();
         dos.writeByte(type);
         switch (type) {
+            case DeviceMessage.TYPE_MIC_STATUS: {
+                byte[] text = msg.getText().getBytes(StandardCharsets.UTF_8);
+                int length = StringUtils.getUtf8TruncationIndex(text, MIC_STATUS_TEXT_MAX_LENGTH);
+                dos.writeInt(msg.getSession());
+                dos.writeByte(msg.getStatus());
+                dos.writeShort(length);
+                dos.write(text, 0, length);
+                break;
+            }
+            case DeviceMessage.TYPE_MIC_PCM:
+                dos.writeInt(msg.getSession());
+                dos.writeLong(msg.getPts());
+                dos.writeShort(msg.getData().length);
+                dos.write(msg.getData());
+                break;
+            case DeviceMessage.TYPE_AUDIO_CLOCK:
+                dos.writeInt(msg.getSession());
+                dos.writeInt((int) msg.getSequence());
+                dos.writeLong(msg.getPts());
+                break;
             case DeviceMessage.TYPE_CLIPBOARD:
                 String text = msg.getText();
                 byte[] raw = text.getBytes(StandardCharsets.UTF_8);

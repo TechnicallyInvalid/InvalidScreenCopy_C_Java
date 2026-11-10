@@ -1,7 +1,84 @@
 # Verification
 
 Upstream base: `a0c27ff382c411af1301dcc1cd8205c9aeb81996` (v5.0.1).
-Fork protocol/build version: `5.0.1-invalid.1`.
+Fork protocol/build version: `5.0.1-invalid.2`.
+
+## Optional microphones — 2026-11-10
+
+The final source build includes the Android Java/AIDL/D8 server, C/Objective-C
+client and private native AAC encoder. All 22 Meson tests pass. New tests cover
+the mixer, clock mapping, fake local capture/permissions, the control bridge and
+recording lifecycle. Existing filename, screenshot, recorder and upstream checks
+remain included. No real capture device or rendering window is initialized.
+
+- All four microphone combinations are tested twice with distinct synthetic
+  tones: device audio remains present, selected microphones are present, and
+  deselected sources are absent. Neither-mic recordings preserve the encoded
+  device AAC payloads and timestamps; mixed-to-neither transitions preserve the
+  original device metadata.
+- Mixer tests include 44.1 kHz resampling, ±10 ms timestamp jitter, missing chosen
+  sources, queue bounds, sink/encoder-output failures, and repeated shutdown.
+  Sixty-second local/device drift scenarios (including opposing ±200 ppm clocks)
+  keep a marker near 59 seconds within 6 ms of the synthetic video timeline.
+- Local capture tests use injected fake permissions/devices only. They verify
+  zero opens when off, denied/restricted/open/resume failures, bounded queues,
+  starvation, disconnect, release and irregular callback scheduling. Ten-minute
+  ±200 ppm drift simulations stay within 3 ms. These are algorithm tests, not
+  physical ADC/driver latency measurements.
+- Host/device clock tests cover six-minute drift, asymmetric transport delay,
+  stale/duplicate/outlier replies, expiry, overflow and 32/64-sample chunks.
+  Clock correction is gradual per chunk; a delayed clock reply cannot create
+  a backward timestamp step.
+- Recording tests cover selection without capture, all four source combinations,
+  repeated clips, permission/open failure, source disappearance, errors arriving
+  during Stop, stale sessions, stop-delivery failure and shutdown. Required
+  device-output failure disables native Record, even with neither mic selected.
+- The bridge tests require a session-matched Android release acknowledgement;
+  a stale acknowledgement times out and interrupts the fake transport. A closed
+  connection cannot revive capture or clock mapping. Capture cleanup is distinct
+  from disk finalization, including deterministic blocked-file tests.
+- Java host tests compile the actual session, timestamp, sender and protocol
+  logic against minimal platform stubs: disabled/denied/unsupported/silenced
+  inputs, source loss, accurate frame-position mapping, queue limits, stale
+  sessions and five-second heartbeat expiry all pass. Terminal status follows
+  release. The complete Android SDK build separately verifies platform APIs.
+
+Reproduce the final synthetic suites without a system H.264 encoder:
+
+```sh
+scripts/build-invalidscreencopy.sh
+python3 scripts/test-capture-control.py
+python3 scripts/test-microphone-protocol.py
+python3 scripts/test-android-mic.py
+scripts/test-recording.sh
+scripts/test-microphone-recording.sh
+scripts/package-macos.sh
+```
+
+The checked-in fixture is generated test data, documented in
+[app/tests/data/README.md](app/tests/data/README.md). Five original MP4 checks
+verify exact AAC passthrough and complete decode. Three additional H.264/AAC
+clips exercise Android-only, local-only and both with distinct generated tones;
+the script checks selected-source presence, deselected-source absence, monotonic
+packet timestamps, full decode and A/V endpoints within 50 ms. A simulated
+400 ms capture cleanup does not extend the final video beyond the frozen Stop
+boundary. The final run measured approximately 9.6 ms between audio/video
+endpoints for each mixed clip, with video durations of approximately 505 ms
+despite the additional 400 ms cleanup. These end-to-end fixtures use fake
+microphones.
+
+The final build-4 bundle passes `codesign --verify --deep --strict`. Both app
+plists contain the microphone purpose string. All nine files in its Mach-O
+graph require macOS 27.0 and resolve exclusively to system or bundled private
+libraries; all seven signed dylib hashes match the packaged manifest. The
+previous bundle is preserved in `dist/previous.YT56NP/InvalidScreenCopy.app`.
+
+No real microphone, phone interaction, permission dialog, mirroring, live resize,
+app installation or app launch is performed for this feature. The package is
+validated through signatures, plists and the Mach-O dependency graph. Physical
+microphone quality, platform support and physical A/V synchronization remain
+unverified. The Mac-wide display panic and prior muffled/slow-audio report are
+not claimed resolved. User recordings and folder preferences remain untouched.
 
 ## Crash repair validation — 2026-11-10
 

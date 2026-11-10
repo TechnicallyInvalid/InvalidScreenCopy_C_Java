@@ -5,6 +5,11 @@ import android.media.MediaCodec;
 import java.nio.ByteBuffer;
 
 public interface AudioCapture {
+    // Null/unknown configuration must not be mistaken for proof that concurrent
+    // device-output and microphone capture is available.
+    default boolean isCapturingWithoutSilencing() { return false; }
+    default boolean hasReliableTimestamps() { return false; }
+
     void checkCompatibility() throws AudioCaptureException;
     void start() throws AudioCaptureException;
     void stop();

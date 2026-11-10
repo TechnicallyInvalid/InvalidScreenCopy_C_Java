@@ -1,5 +1,5 @@
 project('InvalidScreenCopy', 'c',
-        version: '5.0.1-invalid.1',
+        version: '5.0.1-invalid.2',
         meson_version: '>= 0.49',
         default_options: [
             'c_std=c11',

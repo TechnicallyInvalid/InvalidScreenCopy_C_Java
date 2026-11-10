@@ -2,8 +2,9 @@
 set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
-: "${FFMPEG:=ffmpeg}"
-: "${FFPROBE:=ffprobe}"
+: "${FFMPEG:=$project_dir/build-deps/prefix/bin/ffmpeg}"
+: "${FFPROBE:=$project_dir/build-deps/prefix/bin/ffprobe}"
+: "${ISC_TEST_FIXTURE:=$project_dir/app/tests/data/recording-fixture.mp4}"
 export FFMPEG FFPROBE
 if [ "$(uname -s)" = Darwin ]; then
   # Inspect before executing external tools: their transitive dependencies can
@@ -13,8 +14,8 @@ fi
 test_dir=$(mktemp -d "$project_dir/build/recording-test.XXXXXX")
 mkdir "$test_dir/clips"
 if [ -n "${ISC_TEST_FIXTURE:-}" ]; then
-  # A previously generated synthetic fixture also works with the private,
-  # decoder-only FFmpeg tools, without loading a system encoder dependency.
+  # The checked-in synthetic fixture works with the private FFmpeg tools,
+  # without loading a system H.264 encoder dependency.
   cp "$ISC_TEST_FIXTURE" "$test_dir/fixture.mp4"
 else
   "$FFMPEG" -nostdin -v error -f lavfi -i testsrc2=size=320x240:rate=30 \

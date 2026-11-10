@@ -125,6 +125,11 @@ public final class Server {
                 } else {
                     audioCapture = new AudioPlaybackCapture(options.getAudioDup());
                 }
+                if (controller != null && (audioSource == AudioSource.OUTPUT || audioSource == AudioSource.PLAYBACK)) {
+                    // Additional mic capture never replaces the device-output
+                    // recorder. The worker verifies both remain unsilenced.
+                    controller.setAudioCapture(audioCapture);
+                }
 
                 Streamer audioStreamer = new Streamer(connection.getAudioFd(), audioCodec, options.getSendStreamMeta(), options.getSendFrameMeta());
                 AsyncProcessor audioRecorder;

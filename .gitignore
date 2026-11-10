@@ -10,6 +10,7 @@ local.properties
 /scrcpy-server
 /local/
 *.mp4
+!/app/tests/data/recording-fixture.mp4
 *.mkv
 *.wav
 /.build-tools/
