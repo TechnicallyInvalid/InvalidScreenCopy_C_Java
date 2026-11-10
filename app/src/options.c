@@ -8,7 +8,14 @@ const struct scrcpy_options scrcpy_options_default = {
     .record_filename = NULL,
     .window_title = NULL,
     .push_target = NULL,
+#ifdef __APPLE__
+    // Compatibility defaults while investigating a WindowServer display panic.
+    // OpenGL avoids SDL's Metal presentation path; explicit CLI options still
+    // allow other renderers. This is not a software-only display pipeline.
+    .render_driver = "opengl",
+#else
     .render_driver = NULL,
+#endif
     .video_codec_options = NULL,
     .audio_codec_options = NULL,
     .video_encoder = NULL,
@@ -23,7 +30,11 @@ const struct scrcpy_options scrcpy_options_default = {
     .audio_codec = SC_CODEC_AAC,
     .video_source = SC_VIDEO_SOURCE_DISPLAY,
     .audio_source = SC_AUDIO_SOURCE_AUTO,
+#ifdef __APPLE__
+    .hwdec_mode = SC_HWDEC_MODE_DISABLED,
+#else
     .hwdec_mode = SC_HWDEC_MODE_AUTO,
+#endif
     .record_format = SC_RECORD_FORMAT_AUTO,
     .keyboard_input_mode = SC_KEYBOARD_INPUT_MODE_AUTO,
     .mouse_input_mode = SC_MOUSE_INPUT_MODE_AUTO,

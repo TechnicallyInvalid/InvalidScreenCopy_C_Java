@@ -2,17 +2,32 @@
 set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
+: "${FFMPEG:=ffmpeg}"
+: "${FFPROBE:=ffprobe}"
+export FFMPEG FFPROBE
+if [ "$(uname -s)" = Darwin ]; then
+  # Inspect before executing external tools: their transitive dependencies can
+  # also require a newer OS, even when the client itself is compatible.
+  python3 scripts/macos-dependencies.py "$(command -v "$FFMPEG")" "$(command -v "$FFPROBE")"
+fi
 test_dir=$(mktemp -d "$project_dir/build/recording-test.XXXXXX")
 mkdir "$test_dir/clips"
-ffmpeg -nostdin -v error -f lavfi -i testsrc2=size=320x240:rate=30 \
-  -f lavfi -i sine=frequency=440:sample_rate=48000 -t 2 \
-  -c:v libx264 -threads:v 1 -bf 0 -g 15 -c:a aac -ac 2 "$test_dir/fixture.mp4"
+if [ -n "${ISC_TEST_FIXTURE:-}" ]; then
+  # A previously generated synthetic fixture also works with the private,
+  # decoder-only FFmpeg tools, without loading a system encoder dependency.
+  cp "$ISC_TEST_FIXTURE" "$test_dir/fixture.mp4"
+else
+  "$FFMPEG" -nostdin -v error -f lavfi -i testsrc2=size=320x240:rate=30 \
+    -f lavfi -i sine=frequency=440:sample_rate=48000 -t 2 \
+    -c:v libx264 -threads:v 1 -bf 0 -g 15 -c:a aac -ac 2 "$test_dir/fixture.mp4"
+fi
 build/app/test_recording "$test_dir/fixture.mp4" "$test_dir/clips"
 python3 - "$test_dir/clips" "$test_dir/fixture.mp4" <<'PY'
-import json, pathlib, subprocess, sys
+import json, os, pathlib, subprocess, sys
+ffmpeg, ffprobe = os.environ['FFMPEG'], os.environ['FFPROBE']
 
 def audio_packets(path, ignore_edits=False):
-    command = ['ffprobe', '-v', 'error']
+    command = [ffprobe, '-v', 'error']
     if ignore_edits:
         command += ['-ignore_editlist', '1']
     return json.loads(subprocess.check_output(command + [
@@ -25,7 +40,7 @@ expected_audio = [p for p in audio_packets(sys.argv[2]) if int(p['pts']) >= 0]
 files = sorted(pathlib.Path(sys.argv[1]).glob('*.mp4'))
 assert len(files) == 5, files
 for path in files:
-    result = json.loads(subprocess.check_output(['ffprobe', '-v', 'error',
+    result = json.loads(subprocess.check_output([ffprobe, '-v', 'error',
         '-show_streams', '-show_format', '-of', 'json', str(path)]))
     streams = {s['codec_type']: s for s in result['streams']}
     assert streams['video']['codec_name'] == 'h264'
@@ -49,7 +64,7 @@ for path in files:
     duration = float(result['format']['duration'])
     assert (2.9 < duration < 3.3) if extended else (1.8 < duration < 2.3)
     # Decode every frame and audio packet, beyond merely checking MP4 metadata.
-    subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-xerror', '-threads', '1', '-i', str(path),
+    subprocess.run([ffmpeg, '-nostdin', '-v', 'error', '-xerror', '-threads', '1', '-i', str(path),
                     '-fps_mode', 'passthrough', '-f', 'null', '-'], check=True)
     print(f'PASS: {path.name}: 60 video frames, audio={not video_only}, finalized and decoded')
 print('PASS: repeated clips, keyframe gate, audio/video-only, still-frame duration, collisions, cancellation, missing folder, EOF, write failure')

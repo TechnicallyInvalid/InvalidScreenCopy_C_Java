@@ -46,6 +46,9 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 @property(nonatomic, strong) NSString *directory;
 @property(nonatomic, strong) NSOpenPanel *folderPanel;
 @property(nonatomic, strong) NSFileHandle *launcherInput;
+@property(nonatomic, assign) BOOL openingFolder;
+@property(nonatomic, assign) BOOL savingScreenshot;
+@property(nonatomic, assign) BOOL disposed;
 - (void)refresh;
 - (void)start:(id)sender;
 - (void)stop:(id)sender;
@@ -60,16 +63,30 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 
 @implementation InvalidRecordingUI
 - (void)refresh {
+    if (self.disposed) return;
     bool ready, active;
     char message[1024];
     sc_recording_poll(self.recording, &ready, &active, message, sizeof(message));
+    // The lifecycle worker requests this only after its file and packet sinks
+    // are ready. Consume it here on the main-thread timer, never in the worker.
+    if (sc_recording_take_keyframe_request(self.recording) && self.controller) {
+        struct sc_control_msg wake = {.type = SC_CONTROL_MSG_TYPE_INJECT_KEYCODE};
+        wake.inject_keycode.keycode = AKEYCODE_WAKEUP;
+        wake.inject_keycode.action = AKEY_EVENT_ACTION_DOWN;
+        sc_controller_push_msg(self.controller, &wake);
+        wake.inject_keycode.action = AKEY_EVENT_ACTION_UP;
+        sc_controller_push_msg(self.controller, &wake);
+        struct sc_control_msg message = {.type = SC_CONTROL_MSG_TYPE_REQUEST_KEYFRAME};
+        sc_controller_push_msg(self.controller, &message);
+    }
+    bool canStop = sc_recording_can_stop(self.recording);
     self.recordButton.enabled = ready && !active;
-    self.stopButton.enabled = active;
+    self.stopButton.enabled = canStop;
     self.startItem.enabled = ready && !active;
-    self.stopItem.enabled = active;
+    self.stopItem.enabled = canStop;
     BOOL canCapture = sc_screen_can_capture(self.screen) && !self.window.attachedSheet;
     self.screenshotCopyButton.enabled = canCapture;
-    self.saveScreenshotButton.enabled = canCapture;
+    self.saveScreenshotButton.enabled = canCapture && !self.savingScreenshot;
     NSString *detail = [NSString stringWithUTF8String:message] ?: @"";
     NSString *fullDetail = detail;
     if (ready && !active && [detail hasPrefix:@"Waiting for the video"]) {
@@ -128,38 +145,44 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 }
 - (void)saveScreenshot:(id)sender {
     (void)sender;
-    if (self.window.attachedSheet) return;
+    if (self.window.attachedSheet || self.savingScreenshot || self.disposed) return;
     int64_t unix_ms = av_gettime() / 1000;
+    NSString *directory = [self.directory copy];
     NSData *png = [self screenshotPNG];
     if (!png) return;
-    NSError *error = nil;
-    NSString *path = nil;
-    if (ISCSaveScreenshot(png, self.directory, unix_ms, &path, &error))
-        [self screenshotMessage:[@"Saved screenshot: " stringByAppendingString:path.lastPathComponent]];
-    else [self screenshotError:error];
+    self.savingScreenshot = YES;
+    [self refresh];
+    __weak InvalidRecordingUI *weakSelf = self;
+    // Keep at most one PNG in flight. A slow destination must not stall video
+    // presentation or change the directory/timestamp chosen at the button press.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        @autoreleasepool {
+            NSError *error = nil;
+            NSString *path = nil;
+            BOOL saved = ISCSaveScreenshot(png, directory, unix_ms, &path, &error);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                InvalidRecordingUI *owner = weakSelf;
+                if (!owner || owner.disposed) return;
+                owner.savingScreenshot = NO;
+                if (saved) {
+                    [owner screenshotMessage:[@"Saved screenshot: " stringByAppendingString:path.lastPathComponent]];
+                } else {
+                    [owner screenshotError:error];
+                }
+            });
+        }
+    });
 }
 - (void)start:(id)sender {
     (void)sender;
-    if (sc_recording_start(self.recording, self.directory.fileSystemRepresentation,
-                           av_gettime() / 1000)) {
-        if (self.controller) {
-            // Wake an idle phone without toggling an already active display.
-            struct sc_control_msg wake = {.type = SC_CONTROL_MSG_TYPE_INJECT_KEYCODE};
-            wake.inject_keycode.keycode = AKEYCODE_WAKEUP;
-            wake.inject_keycode.action = AKEY_EVENT_ACTION_DOWN;
-            sc_controller_push_msg(self.controller, &wake);
-            wake.inject_keycode.action = AKEY_EVENT_ACTION_UP;
-            sc_controller_push_msg(self.controller, &wake);
-            struct sc_control_msg message = {.type = SC_CONTROL_MSG_TYPE_REQUEST_KEYFRAME};
-            sc_controller_push_msg(self.controller, &message);
-        }
-    }
+    sc_recording_request_start(self.recording, self.directory.fileSystemRepresentation,
+                                av_gettime() / 1000);
     [self refresh];
 }
 - (void)stop:(id)sender {
     (void)sender;
     self.status.stringValue = @"Finishing recording…";
-    sc_recording_stop(self.recording);
+    sc_recording_request_stop(self.recording);
     [self refresh];
 }
 - (void)chooseFolder:(id)sender {
@@ -198,18 +221,32 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
 }
 - (void)openFolder:(id)sender {
     (void)sender;
-    BOOL isDirectory = NO;
-    BOOL exists = [NSFileManager.defaultManager fileExistsAtPath:self.directory
-                                                   isDirectory:&isDirectory];
-    NSURL *url = [NSURL fileURLWithPath:self.directory isDirectory:YES];
-    if (exists && isDirectory && [NSWorkspace.sharedWorkspace openURL:url]) {
-        return;
-    }
-    NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"Could not open recording folder";
-    alert.informativeText = [NSString stringWithFormat:
-        @"Check that this folder still exists and is accessible:\n%@", self.directory];
-    [alert beginSheetModalForWindow:self.window completionHandler:nil];
+    if (self.openingFolder || self.disposed) return;
+    self.openingFolder = YES;
+    self.openFolderButton.enabled = NO;
+    NSString *directory = [self.directory copy];
+    NSURL *url = [NSURL fileURLWithPath:directory isDirectory:YES];
+    NSWorkspaceOpenConfiguration *configuration = NSWorkspaceOpenConfiguration.configuration;
+    configuration.promptsUserIfNeeded = NO;
+    __weak InvalidRecordingUI *weakSelf = self;
+    // LaunchServices and unavailable folders must not block SDL's event loop.
+    // This API completes on a concurrent queue; touch AppKit only on main.
+    [NSWorkspace.sharedWorkspace openURL:url configuration:configuration
+        completionHandler:^(NSRunningApplication *application, NSError *error) {
+        (void)application;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            InvalidRecordingUI *owner = weakSelf;
+            if (!owner || owner.disposed) return;
+            owner.openingFolder = NO;
+            owner.openFolderButton.enabled = YES;
+            if (!error) return;
+            NSAlert *alert = [[NSAlert alloc] init];
+            alert.messageText = @"Could not open recording folder";
+            alert.informativeText = [NSString stringWithFormat:@"%@\n\n%@",
+                error.localizedDescription, directory];
+            [alert beginSheetModalForWindow:owner.window completionHandler:nil];
+        });
+    }];
 }
 - (void)showDevices:(id)sender {
     (void)sender;
@@ -225,6 +262,7 @@ static NSUserDefaults *ISCRecordingDefaults(void) {
     } else [launcher activateWithOptions:NSApplicationActivateAllWindows];
 }
 - (void)dispose {
+    self.disposed = YES;
     [self.timer invalidate];
     self.timer = nil;
     [self.folderPanel cancel:nil];
@@ -263,20 +301,29 @@ sc_recording_ui_create(struct sc_screen *screen, struct sc_recording *recording,
             ?: ui.launchDirectory;
         ui.accessory = [[NSTitlebarAccessoryViewController alloc] init];
         ui.accessory.layoutAttribute = NSLayoutAttributeBottom;
-        // All controls stay below the native title/status line, where macOS
-        // places its screen-sharing indicator. Keep the full row visible.
-        NSSize minimumSize = nativeWindow.minSize;
-        minimumSize.width = MAX(minimumSize.width, 806);
-        nativeWindow.minSize = minimumSize;
-        NSRect windowFrame = nativeWindow.frame;
-        if (windowFrame.size.width < minimumSize.width) {
-            windowFrame.size.width = minimumSize.width;
-            [nativeWindow setFrame:windowFrame display:YES];
-        }
+        // SDL owns the window size and phone aspect ratio. Adapt this accessory
+        // to that width instead of imposing a competing native frame/minimum.
         CGFloat rowWidth = nativeWindow.contentView.bounds.size.width;
-        NSView *view = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 66)];
-        [view.heightAnchor constraintEqualToConstant:66].active = YES;
-        ui.accessory.fullScreenMinHeight = 66;
+        NSView *view = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 82)];
+        [view.heightAnchor constraintEqualToConstant:82].active = YES;
+        ui.accessory.fullScreenMinHeight = 82;
+        // Keep all six buttons on the lower line, clear of native title-bar
+        // indicators. A visible scrollbar exposes overflow on narrow phones.
+        NSScrollView *controls = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, rowWidth, 48)];
+        controls.autoresizingMask = NSViewWidthSizable;
+        controls.borderType = NSNoBorder;
+        controls.drawsBackground = NO;
+        controls.contentView.drawsBackground = NO;
+        controls.hasHorizontalScroller = YES;
+        controls.hasVerticalScroller = NO;
+        controls.autohidesScrollers = YES;
+        controls.scrollerStyle = NSScrollerStyleLegacy;
+        controls.horizontalScrollElasticity = NSScrollElasticityNone;
+        controls.verticalScrollElasticity = NSScrollElasticityNone;
+        controls.accessibilityLabel = @"Recording and screenshot controls";
+        controls.toolTip = @"Scroll horizontally to reach all recording and screenshot buttons";
+        NSView *buttonRow = [[InvalidRecordingRow alloc] initWithFrame:NSMakeRect(0, 0, 806, 32)];
+        controls.documentView = buttonRow;
         ui.recordButton = [NSButton buttonWithTitle:@"● Record" target:ui action:@selector(start:)];
         ui.recordButton.frame = NSMakeRect(12, 4, 90, 28);
         ui.recordButton.accessibilityLabel = @"Record";
@@ -295,17 +342,18 @@ sc_recording_ui_create(struct sc_screen *screen, struct sc_recording *recording,
         ui.saveScreenshotButton.frame = NSMakeRect(650, 4, 144, 28);
         ui.status = [NSTextField labelWithString:@"Waiting for the video stream…"];
         // Symmetric insets center status text while leaving native controls clear.
-        ui.status.frame = NSMakeRect(80, 38, rowWidth - 160, 20);
+        ui.status.frame = NSMakeRect(80, 54, MAX(0, rowWidth - 160), 20);
         ui.status.autoresizingMask = NSViewWidthSizable;
         ui.status.alignment = NSTextAlignmentCenter;
         ui.status.lineBreakMode = NSLineBreakByTruncatingMiddle;
         ui.status.font = [NSFont systemFontOfSize:11];
-        [view addSubview:ui.recordButton];
-        [view addSubview:ui.stopButton];
-        [view addSubview:chooseFolder];
-        [view addSubview:ui.openFolderButton];
-        [view addSubview:ui.screenshotCopyButton];
-        [view addSubview:ui.saveScreenshotButton];
+        [buttonRow addSubview:ui.recordButton];
+        [buttonRow addSubview:ui.stopButton];
+        [buttonRow addSubview:chooseFolder];
+        [buttonRow addSubview:ui.openFolderButton];
+        [buttonRow addSubview:ui.screenshotCopyButton];
+        [buttonRow addSubview:ui.saveScreenshotButton];
+        [view addSubview:controls];
         [view addSubview:ui.status];
         ui.accessory.view = view;
         [nativeWindow addTitlebarAccessoryViewController:ui.accessory];

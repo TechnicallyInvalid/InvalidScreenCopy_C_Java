@@ -1,6 +1,8 @@
 #import "screenshot.h"
 #include "capture_file.h"
 #include <errno.h>
+#include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -61,22 +63,48 @@ BOOL ISCSaveScreenshot(NSData *png, NSString *directory, int64_t unix_ms,
         ISCImageError(error, @"No screenshot data is available to save.");
         return NO;
     }
-    char *path = NULL;
-    FILE *file = sc_capture_create_file(directory.fileSystemRepresentation,
-                                        unix_ms, "png", &path);
-    if (!file) {
-        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil];
+    // A process exit during writing must leave only a hidden temporary file,
+    // never an incomplete PNG with its final timestamped name.
+    char *temporary;
+    if (asprintf(&temporary, "%s/.InvalidScreenCopy-screenshot-XXXXXX",
+                 directory.fileSystemRepresentation) < 0) {
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:ENOMEM userInfo:nil];
         return NO;
     }
-    BOOL ok = fwrite(png.bytes, 1, png.length, file) == png.length;
+    int fd = mkstemp(temporary); // private mode 0600, in the destination filesystem
     int code = errno;
-    if (fclose(file)) { ok = NO; code = errno; }
+    BOOL ok = NO;
+    char *path = NULL;
+    if (fd >= 0) {
+        if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+            code = errno;
+            close(fd);
+        } else {
+            FILE *file = fdopen(fd, "wb");
+            if (!file) {
+                code = errno;
+                close(fd);
+            } else {
+                errno = 0;
+                ok = fwrite(png.bytes, 1, png.length, file) == png.length;
+                code = errno;
+                if (fclose(file)) { ok = NO; code = errno; }
+                if (ok) {
+                    ok = sc_capture_publish_file(temporary, directory.fileSystemRepresentation,
+                                                  unix_ms, "png", &path);
+                    if (!ok) code = errno;
+                }
+            }
+        }
+        // A successfully published path owns the complete contents. A failed
+        // publication leaves existing files untouched, even on unsupported FSes.
+        unlink(temporary);
+    }
+    free(temporary);
     if (ok) {
         if (savedPath) *savedPath = [NSFileManager.defaultManager
             stringWithFileSystemRepresentation:path length:strlen(path)];
     } else {
-        // Remove only our newly reserved, incomplete PNG, never an older file.
-        unlink(path);
         if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain
             code:code ?: EIO userInfo:nil];
     }

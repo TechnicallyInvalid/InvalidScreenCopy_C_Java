@@ -57,6 +57,58 @@ sc_recorder_queue_clear(struct sc_recorder_queue *queue) {
     }
 }
 
+static size_t
+sc_recorder_packet_cost(const AVPacket *packet) {
+    assert(packet->size >= 0);
+    return (size_t) packet->size + sizeof(*packet) + sizeof(packet);
+}
+
+// The caller holds recorder->mutex.
+static AVPacket *
+sc_recorder_queue_pop(struct sc_recorder *recorder,
+                      struct sc_recorder_queue *queue) {
+    sc_mutex_assert(&recorder->mutex);
+    AVPacket *packet = sc_vecdeque_pop(queue);
+    size_t cost = sc_recorder_packet_cost(packet);
+    assert(recorder->queued_bytes >= cost);
+    recorder->queued_bytes -= cost;
+    return packet;
+}
+
+// Never wait for disk I/O here: these callbacks run on stream producers.
+static enum sc_sink_result
+sc_recorder_queue_push(struct sc_recorder *recorder,
+                       struct sc_recorder_queue *queue,
+                       const AVPacket *packet, int stream_index) {
+    sc_mutex_assert(&recorder->mutex);
+    size_t cost = sc_recorder_packet_cost(packet);
+    size_t count = sc_vecdeque_size(&recorder->video_queue)
+                 + sc_vecdeque_size(&recorder->audio_queue);
+    if (cost > SC_RECORDER_MAX_QUEUE_BYTES
+            || recorder->queued_bytes > SC_RECORDER_MAX_QUEUE_BYTES - cost
+            || count >= SC_RECORDER_MAX_QUEUE_PACKETS) {
+        LOGE("Recording output is too slow; queued data limit reached");
+        recorder->queue_overflow = true;
+        recorder->stopped = true;
+        sc_cond_signal(&recorder->cond);
+        return SC_SINK_KO;
+    }
+
+    AVPacket *copy = sc_recorder_packet_ref(packet);
+    if (!copy) {
+        return SC_SINK_KO;
+    }
+    copy->stream_index = stream_index;
+    if (!sc_vecdeque_push(queue, copy)) {
+        LOG_OOM();
+        av_packet_free(&copy);
+        return SC_SINK_KO;
+    }
+    recorder->queued_bytes += cost;
+    sc_cond_signal(&recorder->cond);
+    return SC_SINK_OK;
+}
+
 static const char *
 sc_recorder_get_format_name(enum sc_record_format format) {
     switch (format) {
@@ -80,7 +132,8 @@ sc_recorder_get_format_name(enum sc_record_format format) {
 
 static bool
 sc_recorder_set_extradata(AVStream *ostream, const AVPacket *packet) {
-    uint8_t *extradata = av_malloc(packet->size * sizeof(uint8_t));
+    uint8_t *extradata = av_mallocz((size_t) packet->size
+                                  + AV_INPUT_BUFFER_PADDING_SIZE);
     if (!extradata) {
         LOG_OOM();
         return false;
@@ -89,6 +142,7 @@ sc_recorder_set_extradata(AVStream *ostream, const AVPacket *packet) {
     // copy the first packet to the extra data
     memcpy(extradata, packet->data, packet->size);
 
+    av_freep(&ostream->codecpar->extradata);
     ostream->codecpar->extradata = extradata;
     ostream->codecpar->extradata_size = packet->size;
     return true;
@@ -224,6 +278,7 @@ sc_recorder_close_output_file(struct sc_recorder *recorder) {
         ok = avio_close(recorder->ctx->pb) >= 0;
     }
     avformat_free_context(recorder->ctx);
+    recorder->ctx = NULL;
     return ok;
 }
 
@@ -269,14 +324,14 @@ sc_recorder_process_header(struct sc_recorder *recorder) {
     if (recorder->video_expects_config_packet &&
             !sc_vecdeque_is_empty(&recorder->video_queue)) {
         assert(recorder->video);
-        video_pkt = sc_vecdeque_pop(&recorder->video_queue);
+        video_pkt = sc_recorder_queue_pop(recorder, &recorder->video_queue);
     }
 
     AVPacket *audio_pkt = NULL;
     if (recorder->audio_expects_config_packet &&
             !sc_vecdeque_is_empty(&recorder->audio_queue)) {
         assert(recorder->audio);
-        audio_pkt = sc_vecdeque_pop(&recorder->audio_queue);
+        audio_pkt = sc_recorder_queue_pop(recorder, &recorder->audio_queue);
     }
 
     sc_mutex_unlock(&recorder->mutex);
@@ -383,11 +438,11 @@ sc_recorder_process_packets(struct sc_recorder *recorder) {
                 && sc_vecdeque_is_empty(&recorder->audio_queue)));
 
         if (!video_pkt && !sc_vecdeque_is_empty(&recorder->video_queue)) {
-            video_pkt = sc_vecdeque_pop(&recorder->video_queue);
+            video_pkt = sc_recorder_queue_pop(recorder, &recorder->video_queue);
         }
 
         if (!audio_pkt && !sc_vecdeque_is_empty(&recorder->audio_queue)) {
-            audio_pkt = sc_vecdeque_pop(&recorder->audio_queue);
+            audio_pkt = sc_recorder_queue_pop(recorder, &recorder->audio_queue);
         }
 
         if (recorder->stopped && !video_pkt && !audio_pkt) {
@@ -399,6 +454,7 @@ sc_recorder_process_packets(struct sc_recorder *recorder) {
         }
 
         assert(video_pkt || audio_pkt); // at least one
+        bool stopped = recorder->stopped;
 
         sc_mutex_unlock(&recorder->mutex);
 
@@ -423,7 +479,7 @@ sc_recorder_process_packets(struct sc_recorder *recorder) {
             } else if (recorder->video && recorder->audio && video_pkt
                     && audio_pkt) {
                 pts_origin = MIN(video_pkt->pts, audio_pkt->pts);
-            } else if (recorder->stopped) {
+            } else if (stopped) {
                 if (video_pkt) {
                     // The recorder is stopped without audio, record the video
                     // packets
@@ -489,12 +545,12 @@ sc_recorder_process_packets(struct sc_recorder *recorder) {
         last->duration = MAX(INT64_C(100000), end_pts - last->pts);
         bool ok = sc_recorder_write_video(recorder, last);
         if (!ok) {
-            // failing to write the last frame is not very serious, no
-            // future frame may depend on it, so the resulting file
-            // will still be valid
-            LOGW("Could not record last packet");
+            // Keep the partial clip, but do not report a complete recording
+            // when the final frame could not be written.
+            LOGE("Could not record last packet");
+            error = true;
         }
-        av_packet_free(&last);
+        av_packet_free(&video_pkt_previous);
     }
 
     int ret = av_write_trailer(recorder->ctx);
@@ -504,6 +560,7 @@ sc_recorder_process_packets(struct sc_recorder *recorder) {
     }
 
 end:
+    av_packet_free(&video_pkt_previous);
     if (video_pkt) {
         av_packet_free(&video_pkt);
     }
@@ -517,6 +574,12 @@ end:
 static bool
 sc_recorder_record(struct sc_recorder *recorder) {
     bool ok = sc_recorder_process_packets(recorder);
+    // Publish termination before freeing ctx so a late sink open cannot use
+    // an already destroyed muxer. Sink open and this transition share the lock.
+    sc_mutex_lock(&recorder->mutex);
+    recorder->stopped = true;
+    ok = ok && !recorder->queue_overflow;
+    sc_mutex_unlock(&recorder->mutex);
     bool closed = sc_recorder_close_output_file(recorder);
     return ok && closed;
 }
@@ -537,6 +600,7 @@ run_recorder(void *data) {
     // Discard pending packets
     sc_recorder_queue_clear(&recorder->video_queue);
     sc_recorder_queue_clear(&recorder->audio_queue);
+    recorder->queued_bytes = 0;
     sc_mutex_unlock(&recorder->mutex);
 
     if (success) {
@@ -671,26 +735,10 @@ sc_recorder_video_packet_sink_push(struct sc_packet_sink *sink,
         return SC_SINK_STOPPED;
     }
 
-    AVPacket *rec = sc_recorder_packet_ref(packet);
-    if (!rec) {
-        sc_mutex_unlock(&recorder->mutex);
-        return SC_SINK_KO;
-    }
-
-    rec->stream_index = recorder->video_stream.index;
-
-    bool ok = sc_vecdeque_push(&recorder->video_queue, rec);
-    if (!ok) {
-        LOG_OOM();
-        sc_mutex_unlock(&recorder->mutex);
-        av_packet_free(&rec);
-        return SC_SINK_KO;
-    }
-
-    sc_cond_signal(&recorder->cond);
-
+    enum sc_sink_result result = sc_recorder_queue_push(recorder,
+        &recorder->video_queue, packet, recorder->video_stream.index);
     sc_mutex_unlock(&recorder->mutex);
-    return SC_SINK_OK;
+    return result;
 }
 
 static bool
@@ -705,6 +753,11 @@ sc_recorder_audio_packet_sink_open(struct sc_packet_sink *sink,
     assert(!recorder->audio_init);
 
     sc_mutex_lock(&recorder->mutex);
+
+    if (recorder->stopped) {
+        sc_mutex_unlock(&recorder->mutex);
+        return false;
+    }
 
     AVStream *stream = avformat_new_stream(recorder->ctx, NULL);
     if (!stream) {
@@ -761,26 +814,10 @@ sc_recorder_audio_packet_sink_push(struct sc_packet_sink *sink,
         return SC_SINK_STOPPED;
     }
 
-    AVPacket *rec = sc_recorder_packet_ref(packet);
-    if (!rec) {
-        sc_mutex_unlock(&recorder->mutex);
-        return SC_SINK_KO;
-    }
-
-    rec->stream_index = recorder->audio_stream.index;
-
-    bool ok = sc_vecdeque_push(&recorder->audio_queue, rec);
-    if (!ok) {
-        LOG_OOM();
-        sc_mutex_unlock(&recorder->mutex);
-        av_packet_free(&rec);
-        return SC_SINK_KO;
-    }
-
-    sc_cond_signal(&recorder->cond);
-
+    enum sc_sink_result result = sc_recorder_queue_push(recorder,
+        &recorder->audio_queue, packet, recorder->audio_stream.index);
     sc_mutex_unlock(&recorder->mutex);
-    return SC_SINK_OK;
+    return result;
 }
 
 static void
@@ -837,7 +874,9 @@ sc_recorder_init(struct sc_recorder *recorder, const char *filename,
     sc_vecdeque_init(&recorder->video_queue);
     sc_vecdeque_init(&recorder->audio_queue);
     recorder->stopped = false;
+    recorder->queue_overflow = false;
     recorder->duration_hint = 0;
+    recorder->queued_bytes = 0;
 
     recorder->video_init = false;
     recorder->audio_init = false;

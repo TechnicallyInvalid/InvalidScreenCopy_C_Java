@@ -355,6 +355,11 @@ if get_option('buildtype') == 'debug'
         tests += [['test_recording_file', [
             'tests/test_recording_file.c', 'src/recording_file.c',
         ]]]
+        tests += [['test_recorder_safety', [
+            'tests/test_recorder_safety.c', 'src/recorder.c', 'src/options.c',
+            'src/util/thread.c', 'src/util/log.c', 'src/util/str.c',
+            'src/util/strbuf.c', 'src/util/memory.c', 'src/util/tick.c',
+        ]]]
         executable('test_recording', [
             'tests/test_recording.c', 'src/recording.c', 'src/recording_file.c',
             'src/recorder.c', 'src/options.c', 'src/compat.c',
@@ -362,6 +367,14 @@ if get_option('buildtype') == 'debug'
             'src/util/strbuf.c', 'src/util/memory.c', 'src/util/tick.c',
         ], include_directories: src_dir, dependencies: dependencies,
            c_args: ['-DSC_TEST'])
+        recording_async_test = executable('test_recording_async', [
+            'tests/test_recording_async.c', 'src/recording_file.c',
+            'src/recorder.c', 'src/options.c', 'src/compat.c',
+            'src/util/thread.c', 'src/util/log.c', 'src/util/str.c',
+            'src/util/strbuf.c', 'src/util/memory.c', 'src/util/tick.c',
+        ], include_directories: src_dir, dependencies: dependencies,
+           c_args: ['-DSC_TEST'])
+        test('test_recording_async', recording_async_test, timeout: 20)
     endif
 
     foreach t : tests

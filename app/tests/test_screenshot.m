@@ -1,6 +1,9 @@
 #import "screenshot.h"
+#include "capture_file.h"
 #include <assert.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 int main(void) {
     @autoreleasepool {
@@ -37,13 +40,51 @@ int main(void) {
         assert(ISCSaveScreenshot(png, directory, 1794100000123, &third, nil));
         assert([third hasSuffix:@"-123-003.png"]);
         assert([[NSData dataWithContentsOfFile:first] isEqualToData:png]);
+        assert([[NSData dataWithContentsOfFile:second] isEqualToData:png]);
+        assert([[NSData dataWithContentsOfFile:third] isEqualToData:png]);
         struct stat info;
         assert(!stat(first.fileSystemRepresentation, &info));
         assert((info.st_mode & 0777) == 0600);
+
+        // A partly written staging file has no final PNG name. Publication
+        // happens only once its complete contents have been closed successfully.
+        NSString *pending = [directory stringByAppendingPathComponent:@".pending-screenshot"];
+        NSString *fourth = [[first stringByDeletingPathExtension] stringByAppendingString:@"-004.png"];
+        int fd = open(pending.fileSystemRepresentation, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        assert(fd >= 0);
+        FILE *staged = fdopen(fd, "wb");
+        assert(staged);
+        NSUInteger half = png.length / 2;
+        assert(fwrite(png.bytes, 1, half, staged) == half);
+        assert(!fflush(staged));
+        assert(![NSFileManager.defaultManager fileExistsAtPath:fourth]);
+        assert(fwrite((const uint8_t *)png.bytes + half, 1, png.length - half, staged) == png.length - half);
+        assert(!fclose(staged));
+        char *published = NULL;
+        assert(sc_capture_publish_file(pending.fileSystemRepresentation, directory.fileSystemRepresentation,
+                                        1794100000123, "png", &published));
+        assert([fourth isEqualToString:[NSString stringWithUTF8String:published]]);
+        assert([[NSData dataWithContentsOfFile:fourth] isEqualToData:png]);
+        assert(!stat(published, &info) && (info.st_mode & 0777) == 0600);
+        // Exclusive rename consumes the temporary name; hard-link publication
+        // leaves it for the caller to remove. Both expose only complete data.
+        if ([NSFileManager.defaultManager fileExistsAtPath:pending])
+            assert(!unlink(pending.fileSystemRepresentation));
+        assert(!stat(published, &info) && info.st_nlink == 1);
+        free(published);
+
+        // Publication failure must neither replace a previous file nor leave a
+        // final name or hidden temporary file behind.
+        NSArray *beforeFailure = [NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:nil];
+        assert(!ISCSaveScreenshot(png, directory, -1, nil, &error) && error.code == EINVAL);
+        NSArray *afterFailure = [NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:nil];
+        assert([[NSSet setWithArray:beforeFailure] isEqualToSet:[NSSet setWithArray:afterFailure]]);
+        for (NSString *name in afterFailure) assert(![name hasPrefix:@".InvalidScreenCopy-screenshot-"]);
+        assert([[NSData dataWithContentsOfFile:first] isEqualToData:png]);
         assert(!ISCSaveScreenshot(png, [directory stringByAppendingPathComponent:@"missing"], 0, nil, &error));
         assert(error.code == ENOENT);
         assert([NSFileManager.defaultManager removeItemAtPath:directory error:nil]);
-        NSLog(@"PASS: PNG dimensions/colors/stride; missing frame/folder; exclusive names, symlink collisions, permissions");
+        NSLog(@"PASS: PNG dimensions/colors/stride; atomic publication; complete payloads; collisions, permissions, failure cleanup");
     }
     return 0;
 }

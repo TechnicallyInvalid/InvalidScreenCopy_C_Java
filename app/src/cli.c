@@ -441,7 +441,8 @@ static const struct sc_option options[] = {
                 "(always use software decoding), \"vaapi\" (Linux only), "
                 "\"d3d11va\" (Windows only) and \"videotoolbox\" (macOS "
                 "only).\n"
-                "Default is \"auto\".",
+                "Default is \"disabled\" on macOS (compatibility mode), "
+                "\"auto\" on other platforms.",
     },
     {
         .longopt_id = OPT_IGNORE_VIDEO_ENCODER_CONSTRAINTS,
@@ -829,7 +830,8 @@ static const struct sc_option options[] = {
                 "hint).\n"
                 "Supported names are currently \"direct3d\", \"opengl\", "
                 "\"opengles2\", \"opengles\", \"metal\" and \"software\".\n"
-                "<https://wiki.libsdl.org/SDL_HINT_RENDER_DRIVER>",
+                "Default on macOS is \"opengl\" (compatibility mode).\n"
+                "<https://wiki.libsdl.org/SDL3/SDL_HINT_RENDER_DRIVER>",
     },
     {
         .longopt_id = OPT_RENDER_FIT,

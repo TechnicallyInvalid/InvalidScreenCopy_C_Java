@@ -3,7 +3,44 @@
 Upstream base: `a0c27ff382c411af1301dcc1cd8205c9aeb81996` (v5.0.1).
 Fork protocol/build version: `5.0.1-invalid.1`.
 
-## Build
+## Crash repair validation — 2026-11-10
+
+This section supersedes the dependency/renderer status of the historical tests
+below. See [CRASH_REVIEW.md](CRASH_REVIEW.md) for evidence and limits.
+
+- Rebuilt the real Android Java/AIDL/D8 server and the C/Objective-C client.
+  Java emits only its existing source/target-8 obsolescence warnings.
+- Source-built private SDL 3.4.20, FFmpeg 9.0.2, dav1d 1.5.4 and libusb 1.0.30.
+  All nine files in the client/launcher non-system Mach-O graph require macOS
+  27.0, matching this host; no Homebrew runtime dependency remains. The validator
+  rejects the old 27.2 dependency graph. FFmpeg tools additionally validate as
+  compatible, and the client is built with `videotoolbox=false`.
+- All 17 Meson tests pass, including new deterministic stalled-open/close
+  recording lifecycle tests and blocked-writer queue/lifetime tests. No rendering
+  window is created. Screenshot tests use synthetic SDL surfaces only and cover
+  atomic complete-PNG publication, collision/symlink safety and failure cleanup.
+- `python3 scripts/test-capture-control.py` passes six host-side Java lifecycle
+  scenarios. Minimal Android stubs test synchronization and request/reset logic;
+  they do not establish how the phone's actual MediaCodec will behave.
+- Five synthetic H.264/AAC/video-only MP4s pass finalization, full decoding,
+  exact AAC payload/timestamp comparison, EOF, cancellation, collision,
+  keyframe-gating, missing-folder and injected-write-error checks. Used private
+  FFmpeg/ffprobe with the previously generated synthetic two-second fixture
+  (SHA-256 `40da12a21fcccf8584c67776e9af9bda2dfe971f460fb27b731729dbf2bfc603`),
+  avoiding execution of the unsupported Homebrew FFmpeg graph.
+- Final bundle passes `codesign --verify --deep --strict`; its launcher forwards
+  `--version` successfully without initializing a display. All seven embedded
+  dylib hashes match the packaged manifest after signing. The previous app
+  bundle is preserved under an ignored `dist/previous.*` directory.
+
+No phone mirror, live resize, renderer stress, device encoder, or QuickTime
+playback was run in this repair pass. Existing recordings and folder preferences
+were left untouched. These checks do **not** prove the WindowServer/kernel panic
+is eliminated, nor that the earlier muffled/slow audio report is fixed. The new
+OpenGL default, scrollable control row, asynchronous UI behavior, and actual
+phone keyframe behavior still need normal-use validation.
+
+## Earlier build verification (before the crash repair)
 
 - Android server compiled from Java and AIDL with the installed Android 36
   SDK/build-tools 36.0.0, javac 22.0.2, and D8. No precompiled scrcpy server used.

@@ -1078,7 +1078,9 @@ end:
         sc_recording_ui_destroy(recording_ui);
     }
     if (recording_initialized) {
-        sc_recording_stop(&s->recording);
+        // Request finalization without blocking the UI before the display and
+        // streams are stopped. recording_destroy() drains the writer below.
+        sc_recording_request_stop(&s->recording);
     }
 #endif
     if (timeout_started) {

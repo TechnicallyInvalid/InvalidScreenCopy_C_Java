@@ -1,6 +1,7 @@
 # InvalidScreenCopy source review
 
-Reviewed 2026-11-08. Upstream baseline: Genymobile/scrcpy v5.0.1,
+Reviewed 2026-11-08; compatibility/lifecycle update 2026-11-10.
+Upstream baseline: Genymobile/scrcpy v5.0.1,
 commit `a0c27ff382c411af1301dcc1cd8205c9aeb81996`.
 
 ## Finding
@@ -55,11 +56,20 @@ only JUnit as a test dependency; the manual build has no third-party runtime
 Java dependency. Gradle's wrapper checksum is pinned, but the manual build
 avoids the Gradle/plugin dependency graph entirely.
 
-The desktop was compiled with Apple clang 21, Meson 1.12.1, and Ninja 1.13.2.
-It dynamically uses the existing Homebrew FFmpeg 9.0.2, SDL 3.4.20, and libusb
+The original desktop was compiled with Apple clang 21, Meson 1.12.1, and Ninja 1.13.2.
+It dynamically used the existing Homebrew FFmpeg 9.0.2, SDL 3.4.20, and libusb
 1.0.30, plus system frameworks and the existing Android SDK ADB. Their full
-source and transitive dependencies were **not audited or rebuilt**. Building
+source and transitive dependencies were **not audited or rebuilt at that time**. Building
 scrcpy from source does not eliminate those supply-chain trust assumptions.
+
+The 2026-11-10 compatibility repair replaces these runtime libraries with
+private builds of hash-pinned official SDL 3.4.20, minimal FFmpeg 9.0.2,
+dav1d 1.5.4 and libusb 1.0.30 sources. The bundle includes exact dependency
+sources and licenses, with no Homebrew runtime linkage. FFmpeg network support
+and hardware acceleration are disabled. Sources were built and their dependency
+graph inspected; they were **not exhaustively security-audited**. Compiler,
+SDK, OS, source-publisher and ADB trust assumptions remain. Details and limits:
+[crash investigation](CRASH_REVIEW.md).
 
 ## Device evidence and limits
 
@@ -83,8 +93,9 @@ of a persistent scrcpy infection was found in the checks performed.
 
 ## Fork changes reviewed
 
-The fork adds one no-payload control message (23) that refreshes the existing
-video capture/encoder to start a new clip on a keyframe. It adds no socket,
+The fork adds one no-payload control message (23) that requests a sync frame
+from the existing encoder. As of 2026-11-10 it no longer resets capture or
+recreates the encoder. It adds no socket,
 permission, data source, service, or persistence to Android. Desktop Record
 also sends the existing wake-up key action when control is enabled. Client and
 server identify themselves as `5.0.1-invalid.1`, preventing accidental pairing

@@ -38,6 +38,7 @@ static NSMutableDictionary *ISCEnvironment(void) {
 @property(nonatomic, strong) NSFileHandle *logHandle;
 @property(nonatomic, assign) BOOL closingMirror;
 @property(nonatomic, assign) BOOL quitting;
+@property(nonatomic, assign) BOOL closeTimedOut;
 - (void)showDevices:(id)sender;
 - (void)refresh:(id)sender;
 - (void)openDisplay:(id)sender;
@@ -201,7 +202,9 @@ static NSMutableDictionary *ISCEnvironment(void) {
     self.openButton.enabled = !self.closingMirror && (active || selected.ready);
     self.closeButton.enabled = active && !self.closingMirror;
     self.refreshButton.enabled = self.scanTask == nil;
-    if (self.closingMirror) self.status.stringValue = @"Closing the display and finishing any recording…";
+    if (self.closingMirror) self.status.stringValue = self.closeTimedOut
+        ? @"The display is still finishing. Its recording is being preserved; you can keep using this picker."
+        : @"Closing the display and finishing any recording…";
     else if (active) self.status.stringValue = [NSString stringWithFormat:
         @"%@ is open. Close its display before switching devices.", self.mirrorName];
     else if (self.scanError) self.status.stringValue = self.scanError;
@@ -253,10 +256,11 @@ static NSMutableDictionary *ISCEnvironment(void) {
             NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
             dispatch_async(dispatch_get_main_queue(), ^{
                 ISCLauncher *owner = weakSelf;
-                if (!owner || owner.quitting) return;
+                if (!owner || owner.scanTask != task) return;
+                owner.scanTask = nil;
+                if (owner.quitting) return;
                 NSString *selection = [owner selectedDevice].serial;
                 NSArray *devices = task.terminationStatus == 0 && !timedOut ? ISCParseDevices(output) : nil;
-                owner.scanTask = nil;
                 owner.devices = devices ?: @[];
                 owner.scanError = devices ? nil : timedOut ? @"Device discovery timed out. Reconnect the phone, then click Refresh."
                     : @"Could not communicate with Android Debug Bridge. Reconnect the phone, then click Refresh.";
@@ -385,11 +389,30 @@ static NSMutableDictionary *ISCEnvironment(void) {
     (void)sender;
     if (!self.mirrorTask || self.closingMirror) return;
     self.closingMirror = YES;
+    self.closeTimedOut = NO;
     // Request SDL's normal quit path over a private pipe. AppKit-launched
     // processes may inherit ignored SIGINT, so a signal is not a reliable close.
     NSError *error = nil;
     [self.controlPipe.fileHandleForWriting writeData:[@"q" dataUsingEncoding:NSUTF8StringEncoding] error:&error];
+    // EOF is also a graceful quit request. Close the private pipe even if the
+    // write failed; never escalate to killing a potentially active recording.
+    [self.controlPipe.fileHandleForWriting closeAndReturnError:nil];
+    if (error) NSLog(@"Display close request could not be written: %@", error.localizedDescription);
     [self updateControls];
+    NSTask *closingTask = self.mirrorTask;
+    __weak ISCLauncher *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        ISCLauncher *owner = weakSelf;
+        if (!owner || owner.mirrorTask != closingTask || !closingTask.running) return;
+        owner.closeTimedOut = YES;
+        // A slow disk may still be draining. Cancel the deferred application
+        // termination so AppKit remains usable while the child completes.
+        if (owner.quitting) {
+            owner.quitting = NO;
+            [NSApp replyToApplicationShouldTerminate:NO];
+        }
+        [owner updateControls];
+    });
 }
 
 - (NSString *)logTail {
@@ -408,6 +431,52 @@ static NSMutableDictionary *ISCEnvironment(void) {
     self.logPath = nil;
 }
 
+- (void)retainFailureLog {
+    // Keep a bounded private diagnostic tail instead of discarding the only
+    // useful evidence after an abnormal exit. No log is sent anywhere. This is
+    // best effort during app shutdown: the original temporary log is retained
+    // until its private copy succeeds, even if the app exits before this work.
+    [self.logHandle closeFile];
+    self.logHandle = nil;
+    NSString *path = self.logPath;
+    self.logPath = nil;
+    if (!path) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        @autoreleasepool {
+            NSFileHandle *file = [NSFileHandle fileHandleForReadingAtPath:path];
+            unsigned long long end = [file seekToEndOfFile];
+            [file seekToFileOffset:end > 65536 ? end - 65536 : 0];
+            NSData *tail = [file readDataToEndOfFile];
+            [file closeFile];
+            NSString *directory = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/InvalidScreenCopy"];
+            NSFileManager *fm = NSFileManager.defaultManager;
+            NSError *error = nil;
+            if (![fm createDirectoryAtPath:directory withIntermediateDirectories:YES
+                    attributes:@{NSFilePosixPermissions: @0700} error:&error]) return;
+            NSString *destination = [directory stringByAppendingPathComponent:
+                [path.lastPathComponent stringByAppendingString:@".log"]];
+            if (![fm createFileAtPath:destination contents:tail
+                    attributes:@{NSFilePosixPermissions: @0600}]) return;
+            [fm removeItemAtPath:path error:nil];
+            NSArray<NSURL *> *files = [fm contentsOfDirectoryAtURL:[NSURL fileURLWithPath:directory]
+                includingPropertiesForKeys:@[NSURLContentModificationDateKey]
+                options:NSDirectoryEnumerationSkipsHiddenFiles error:nil];
+            NSPredicate *ours = [NSPredicate predicateWithBlock:^BOOL(NSURL *url, NSDictionary *bindings) {
+                (void)bindings;
+                return [url.lastPathComponent hasPrefix:@"InvalidScreenCopy-display-"]
+                    && [url.pathExtension isEqualToString:@"log"];
+            }];
+            files = [[files filteredArrayUsingPredicate:ours] sortedArrayUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
+                NSDate *dateA = nil, *dateB = nil;
+                [a getResourceValue:&dateA forKey:NSURLContentModificationDateKey error:nil];
+                [b getResourceValue:&dateB forKey:NSURLContentModificationDateKey error:nil];
+                return [(dateB ?: NSDate.distantPast) compare:(dateA ?: NSDate.distantPast)];
+            }];
+            for (NSUInteger i = 5; i < files.count; ++i) [fm removeItemAtURL:files[i] error:nil];
+        }
+    });
+}
+
 - (void)showError:(NSString *)detail {
     [self showDevices:nil];
     NSAlert *alert = [NSAlert new];
@@ -418,15 +487,17 @@ static NSMutableDictionary *ISCEnvironment(void) {
 
 - (void)mirrorEnded:(NSTask *)task {
     if (task != self.mirrorTask) return;
-    BOOL expected = self.closingMirror;
-    NSString *details = task.terminationStatus != 0 && !expected ? [self logTail] : nil;
-    [self cleanLog];
+    BOOL failed = task.terminationStatus != 0;
+    NSString *details = failed ? [self logTail] : nil;
+    if (failed) [self retainFailureLog];
+    else [self cleanLog];
     [self.controlPipe.fileHandleForWriting closeFile];
     self.controlPipe = nil;
     self.mirrorTask = nil;
     self.mirrorSerial = nil;
     self.mirrorName = nil;
     self.closingMirror = NO;
+    self.closeTimedOut = NO;
     [self.table reloadData];
     [self updateControls];
     if (self.quitting) [NSApp replyToApplicationShouldTerminate:YES];
@@ -436,8 +507,13 @@ static NSMutableDictionary *ISCEnvironment(void) {
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     (void)sender;
+    if (self.closeTimedOut && self.mirrorTask) {
+        [self updateControls];
+        return NSTerminateCancel;
+    }
     self.quitting = YES;
-    [self.timer invalidate];
+    // The timer observes quitting. Keep it alive if a slow child makes us cancel
+    // termination, so discovery resumes without another app launch.
     if (self.scanTask.running) [self.scanTask terminate];
     if (self.mirrorTask) {
         [self closeDisplay:nil];

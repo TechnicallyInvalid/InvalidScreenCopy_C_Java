@@ -428,12 +428,15 @@ sc_screen_on_resize(struct sc_screen *screen, const SDL_WindowEvent *event) {
     }
 }
 
-#if defined(__APPLE__) || defined(_WIN32)
+// On macOS, keep rendering in the normal event loop. Presenting from the
+// native live-resize callback can reenter rendering while AppKit is updating
+// the window and its drawable. The queued resize events are handled below.
+#if defined(_WIN32)
 # define CONTINUOUS_RESIZING_WORKAROUND
 #endif
 
 #ifdef CONTINUOUS_RESIZING_WORKAROUND
-// On Windows and MacOS, resizing blocks the event loop, so resizing events are
+// On Windows, resizing blocks the event loop, so resizing events are
 // not triggered. As a workaround, handle them in an event handler.
 //
 // <https://bugzilla.libsdl.org/show_bug.cgi?id=2077>

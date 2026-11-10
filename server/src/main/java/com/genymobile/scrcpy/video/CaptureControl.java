@@ -1,6 +1,9 @@
 package com.genymobile.scrcpy.video;
 
+import com.genymobile.scrcpy.util.Ln;
+
 import android.media.MediaCodec;
+import android.os.Bundle;
 
 public class CaptureControl {
 
@@ -13,6 +16,7 @@ public class CaptureControl {
 
     // Current instance of MediaCodec to "interrupt" on reset
     private MediaCodec runningMediaCodec;
+    private boolean keyFrameRequested;
 
     public synchronized boolean isResetRequested() {
         return reset != 0;
@@ -38,13 +42,32 @@ public class CaptureControl {
 
     public synchronized void setRunningMediaCodec(MediaCodec runningMediaCodec) {
         this.runningMediaCodec = runningMediaCodec;
+        requestPendingKeyFrame();
     }
 
-    /** Refresh capture to guarantee a new keyframe even on a static display. */
+    /** Request a keyframe without restarting the encoder or display capture. */
     public synchronized void requestKeyFrame() {
-        // A sync-frame request alone only affects the next input frame. Some
-        // devices stop submitting frames while the screen is static. Resetting
-        // capture supplies a fresh frame without closing the transport/window.
-        reset(RESET_REASON_CLIENT_RESET);
+        keyFrameRequested = true;
+        requestPendingKeyFrame();
+    }
+
+    // Called with this monitor held. SurfaceEncoder publishes only a started
+    // codec and clears it under the same monitor before stop/reset/release.
+    private void requestPendingKeyFrame() {
+        if (!keyFrameRequested || runningMediaCodec == null || reset != 0) {
+            // Preserve requests made during startup or a real capture reset.
+            return;
+        }
+
+        Bundle parameters = new Bundle();
+        parameters.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
+        try {
+            runningMediaCodec.setParameters(parameters);
+            keyFrameRequested = false;
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // Keep the request for a replacement codec, but never reset the
+            // display merely to start recording. The client has a startup timeout.
+            Ln.w("Could not request video keyframe; recording may wait for the next keyframe", e);
+        }
     }
 }

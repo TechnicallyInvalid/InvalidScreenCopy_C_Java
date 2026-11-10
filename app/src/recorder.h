@@ -15,6 +15,12 @@
 
 struct sc_recorder_queue SC_VECDEQUE(AVPacket *);
 
+// Bound queued encoded data when an output device stalls. The byte budget
+// includes each packet's payload and metadata; the count also bounds tiny
+// packets. Overflow fails recording instead of blocking the stream producers.
+#define SC_RECORDER_MAX_QUEUE_BYTES (64 * 1024 * 1024)
+#define SC_RECORDER_MAX_QUEUE_PACKETS 8192
+
 struct sc_recorder_stream {
     int index;
     int64_t last_pts;
@@ -48,7 +54,9 @@ struct sc_recorder {
     sc_cond cond;
     // set on sc_recorder_stop(), packet_sink close or recording failure
     bool stopped;
+    bool queue_overflow;
     int64_t duration_hint;
+    size_t queued_bytes;
     struct sc_recorder_queue video_queue;
     struct sc_recorder_queue audio_queue;
 

@@ -105,7 +105,7 @@ int main(int argc, char **argv) {
     }
     assert(sc_recording_start(&r, argv[2], 1794100000999));
     sc_recording_stop(&r);
-    assert(strstr(r.message, "No video frame"));
+    assert(strstr(r.message, "No keyframe received"));
     assert(!sc_recording_start(&r, "/no/such/recording/directory", 1794100000999));
     assert(strstr(r.message, "Cannot create"));
     // End of stream while recording must still finalize the clip.
